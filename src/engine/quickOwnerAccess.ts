@@ -10,3 +10,13 @@ export interface QuickOwnerAccess {
 export function canUseOwnerTools(access: QuickOwnerAccess | null, activeUserId: string | null): boolean {
   return Boolean(access?.allowed && access.staff && access.owner && activeUserId && access.userId === activeUserId);
 }
+
+/** Device storage scopes carry a prefix; server-resolved grants carry the raw Auth user ID. */
+export function quickOwnerScopeTransition(previous: string | null | undefined, next: string | null): {
+  userId: string | null; changed: boolean;
+} {
+  return {
+    userId: next?.startsWith("user:") && next.length > 5 ? next.slice(5) : null,
+    changed: previous !== undefined && previous !== next,
+  };
+}

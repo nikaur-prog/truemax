@@ -6,6 +6,7 @@ import { GOALS } from "../src/engine/goals.js";
 import { isScanId } from "../src/engine/scanSession.js";
 import { maxAccessForUser } from "./_maxAccess.js";
 import { previewInstructions, previewProvider } from "./_previewProvider.js";
+import { previewGenerationUnavailable } from "./_previewGenerationGate.js";
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 
 // ---------------------------------------------------------------------------
@@ -145,6 +146,8 @@ export async function consented(userId: string): Promise<boolean> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const unavailable = previewGenerationUnavailable();
+  if (unavailable) return unavailable;
   let claimedUserId: string | null = null;
   let previewId: string | null = null;
   const admin = getSupabaseAdmin();

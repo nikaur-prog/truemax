@@ -723,13 +723,13 @@ export async function openTrialFunnel(
       </div>
       <div class="stat-band">
         <b><i class="stat-num" data-to="${MEASUREMENT_COUNT}">0</i> measurements</b>
-        <span>re-taken the same way every scan. One scan is a score; a run of them
-          is the only thing that can tell you a change was real and not the camera.</span>
+        <span>to compare over time. Consistent photos help, but lighting, pose
+          and point placement can still affect the result.</span>
       </div>
       ${
         ceiling
           ? `<div class="offer-ceiling">
-              <span class="offer-ceiling-h">WHERE YOUR SCAN SAYS YOU CAN GET TO</span>
+              <span class="offer-ceiling-h">A MODELLED SCORE SCENARIO</span>
               ${ceilingCtaMarkup(ceiling)}
             </div>`
           : ""

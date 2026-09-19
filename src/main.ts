@@ -1,4 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { initializeTheme } from "./ui/theme.js";
+import { createHomeNavigation } from "./ui/homeNavigation.js";
+import "./ui/theme.css";
 import { captureAttribution } from "./engine/attribution.js";
 import { startScanPerformanceAttempt } from "./engine/scanPerformance.js";
 import type { ScanPerformanceAttempt } from "./engine/scanPerformance.js";
@@ -308,6 +311,7 @@ const stamp = document.getElementById("build-stamp");
 if (stamp) stamp.textContent = __BUILD__;
 // Where this visit came from, read off the URL before anything else runs.
 // First touch wins and it expires; see engine/attribution.ts.
+initializeTheme();
 captureAttribution();
 track("visit");
 const installPrompt = mountInstallPrompt();
@@ -319,6 +323,13 @@ if (import.meta.env.DEV) {
       const { mountMax3DPreview } = await import("./ui/max3dPreview.js");
       document.querySelectorAll<HTMLElement>("body > :not(script)").forEach((node) => { node.style.display = "none"; });
       mountMax3DPreview(document.body);
+    });
+  }
+  if (preview === "max-coach") {
+    queueMicrotask(async () => {
+      const { mountMaxCoachPreview } = await import("./ui/maxCoachPreview.js");
+      document.querySelectorAll<HTMLElement>("body > :not(script)").forEach((node) => { node.style.display = "none"; });
+      mountMaxCoachPreview(document.body);
     });
   }
   if (preview === "funnel" || preview === "offer" || preview === "offer-minor") {
@@ -540,8 +551,13 @@ function scanIsCurrent(token: ScanToken, generation: number): boolean {
   window as unknown as Record<string, unknown>
 ).__truemaxMeasure;
 
-// The idle frame runs the demo reel — real scans of public-domain portraits.
-mountDemoReel(el.reelCanvas, el.reelScore, { pauseWhenCovered: true });
+// The idle frame shows precomputed scans of the disclosed synthetic portraits.
+mountDemoReel(el.reelCanvas, el.reelScore, {
+  pauseWhenCovered: true,
+  controls: {
+    pause: document.getElementById("reel-pause") as HTMLButtonElement,
+  },
+});
 
 // The docked demo neither pins nor shrinks. Both were tried, the resize was
 // re-tuned twice, and it still read as choppy on a real phone — a card that
@@ -1202,7 +1218,7 @@ async function requirePaidMaxBodyProfile(user: User, allowPrompt = true): Promis
   }
 }
 
-document.getElementById("logo-home")?.addEventListener("click", async () => {
+async function openHomeDashboard(): Promise<void> {
   const generation = scanGeneration;
   const user = await currentUser();
   if (generation !== scanGeneration) return;
@@ -1220,12 +1236,7 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
   const dashboardGeneration = scanGeneration;
   const brand = await refreshHomeBrand(user);
   if (dashboardGeneration !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
-  try { await prepareDashboard(); } catch {
-    if (dashboardGeneration === scanGeneration && activeScanOwner() === `user:${user.id}`) {
-      window.alert("Your dashboard could not load. Select your profile again to retry.");
-    }
-    return;
-  }
+  await prepareDashboard();
   if (dashboardGeneration !== scanGeneration || activeScanOwner() !== `user:${user.id}`) return;
   openDashboard({
     onScan: () => resetToUpload(),
@@ -1246,18 +1257,62 @@ document.getElementById("logo-home")?.addEventListener("click", async () => {
     },
     adult: knownAdult,
   });
+}
+let homeNavigationPending = false;
+const requestHomeDashboard = createHomeNavigation({
+  open: openHomeDashboard,
+  busy: (active) => {
+    homeNavigationPending = active;
+    for (const id of ["logo-home", "header-home"]) {
+      const button = document.getElementById(id) as HTMLButtonElement | null;
+      if (!button) continue;
+      button.disabled = active || homeBrandState === "guest";
+      button.setAttribute("aria-busy", String(active));
+    }
+    if (active) showHomeNavigationNotice(false);
+    else document.querySelector('[data-home-navigation="loading"]')?.remove();
+  },
+  failed: () => showHomeNavigationNotice(true),
 });
+
+function showHomeNavigationNotice(failed: boolean): void {
+  document.getElementById("home-nav-notice")?.remove();
+  const notice = document.createElement("p");
+  notice.id = "home-nav-notice";
+  notice.className = "home-nav-notice";
+  notice.dataset.homeNavigation = failed ? "failed" : "loading";
+  notice.setAttribute("role", failed ? "alert" : "status");
+  notice.textContent = failed
+    ? "Your dashboard could not load. Check your connection and try again."
+    : "Opening your dashboard…";
+  if (failed) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", () => { void requestHomeDashboard(); });
+    notice.append(retry);
+  }
+  document.querySelector(".topbar")?.after(notice);
+}
+
+document.getElementById("logo-home")?.addEventListener("click", () => { void requestHomeDashboard(); });
+document.getElementById("header-home")?.addEventListener("click", () => { void requestHomeDashboard(); });
 
 let homeBrandToken = 0;
 let homeBrandState: MembershipBrand = "guest";
 
 function paintHomeBrand(brand: MembershipBrand): void {
   homeBrandState = brand;
+  const home = document.getElementById("header-home") as HTMLButtonElement | null;
+  if (home) {
+    home.hidden = brand === "guest";
+    home.disabled = brand === "guest" || homeNavigationPending;
+  }
   const button = document.getElementById("logo-home") as HTMLButtonElement | null;
   if (!button) return;
   button.classList.remove("brand-guest", "brand-member", "brand-max");
   button.classList.add(brandClass(brand));
-  button.disabled = brand === "guest";
+  button.disabled = brand === "guest" || homeNavigationPending;
   button.title = brand === "guest"
     ? "Sign in to open your dashboard"
     : brand === "max"

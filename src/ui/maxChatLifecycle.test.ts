@@ -48,6 +48,10 @@ function scenario() {
     showAllowance: () => {},
     allowanceLine: () => null,
     announceMaxConversationChanged: () => {},
+    buildCoachingSnapshot: () => ({ routines: [] }),
+    loadProfile: () => ({}),
+    readProtocols: () => [],
+    activeScanOwner: () => "user:test-owner",
     window: {
       setTimeout: (fn: () => void) => { const id = ++nextTimer; timers.set(id, fn); return id; },
       clearTimeout: (id: number) => timers.delete(id),
@@ -61,9 +65,10 @@ function scenario() {
   };
   const runtime = new Function("deps", `
     const {currentAccessToken,fetch,say,fail,write,reactMax,showAllowance,allowanceLine,
-      announceMaxConversationChanged,window,drainMaxStream,maxStreamErrorMessage}=deps;
+      announceMaxConversationChanged,window,drainMaxStream,maxStreamErrorMessage,
+      buildCoachingSnapshot,loadProfile,readProtocols,activeScanOwner}=deps;
     const GIVE_UP_MS=90000;
-    let chatGeneration=1, inFlight=null, transcript=[];
+    let chatGeneration=1, inFlight=null, transcript=[], chatAvatar=null;
     ${askJS}
     return {
       ask:(log,form)=>ask(log,form,"Hello",null,1,{conversationId:null,source:"dashboard",onConversation:()=>{}}),

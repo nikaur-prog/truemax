@@ -1,5 +1,10 @@
 # FaceIQ comparison and TrueMax calibration plan
 
+> Status, 11 September 2026: Recording evidence has informed discrepancies and UX. Matched pilot measurements and operator-reviewed geometry are still needed; scoring ideals have not been fitted. See the
+> [current continuation handoff](CLAUDE_HANDOFF_2026-09-11.md) for branch preservation,
+> verification evidence and the next execution order. Historical details below
+> do not imply that the whole roadmap has shipped.
+
 Date: 7 September 2026. Updated: 9 September 2026. Status: benchmark not completed. The owner has now requested 20 fictional adult identities, 10 per supported reference group, with paired front and side images. Synthetic generation and local TrueMax diagnostics are authorized. FaceIQ batch access permissions and a credit cap remain unresolved; no FaceIQ subscription credits have been spent or scoring parameters fitted for this plan.
 
 The September 9 audit repairs the provenance, EXIF, deadline/cache and collection-count defects listed below. The separate dev-only diagnostic workspace is complete, and all 40 generated images completed two local diagnostic passes. Fifteen profiles reproduce the default jaw template's exact 117.457752-degree angle; this exposes a placement defect, not a validated anatomical measurement. Detailed inputs and exports remain private and gitignored. The synthetic set is an engineering stress test, not a substitute for the independently annotated real-person evaluation. No 90 percent accuracy claim is established. A future release target must state the landmark/measurement tolerances, eligible photo conditions, held-out cohort size, and uncertainty, not a bare percentage.

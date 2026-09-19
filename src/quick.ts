@@ -47,7 +47,10 @@ import {
   reviseRating,
   corpusJSON,
   calibrationDiagnosticsJSON,
+  calibrationReferenceId,
+  validCalibrationReferenceId,
   loadCalibrationSet,
+  loadCalibrationSetForExport,
   missingCoverage,
   sideCount,
   removeRatedFace,
@@ -61,7 +64,7 @@ import { activateScanOwner, activeScanOwner, scopedStorageKey } from "./engine/s
 import { canShareFiles, exportName, outcomeMessage, saveFile, savesDirectly, setSavesDirectly } from "./ui/saveFile.js";
 import { denyQuickAccess, quickAccessProfile } from "./ui/quickGate.js";
 import type { QuickAccess } from "./ui/quickGate.js";
-import { canUseOwnerTools } from "./engine/quickOwnerAccess.js";
+import { canUseOwnerTools, quickOwnerScopeTransition } from "./engine/quickOwnerAccess.js";
 import { copyDiagnostics } from "./ui/diagnostics.js";
 import { mergeReports } from "./engine/scoring.js";
 import { assessPhotoQuality } from "./engine/photoQuality.js";
@@ -75,6 +78,8 @@ import { setSidePriorSuspended } from "./engine/sidePrior.js";
 import { creatorFrontViewIssue } from "./engine/quickCapturePolicy.js";
 import { snapshotCalibrationDiagnostics } from "./engine/calibrationDiagnostics.js";
 import type { CalibrationSideCapture } from "./engine/calibrationDiagnostics.js";
+import { fingerprintCalibrationImage } from "./engine/calibrationImageSource.js";
+import type { CalibrationImageSource } from "./engine/calibrationImageSource.js";
 
 // Quick scans different people, even when the operator is the account owner.
 // Never project that owner's last confirmed ear/jaw geometry onto the next
@@ -502,9 +507,10 @@ if (!isAuthAvailable()) {
   let previousOwner: string | null | undefined;
   const syncOwner = () => {
     const owner = activeScanOwner();
-    const changed = previousOwner !== undefined && previousOwner !== owner;
+    const transition = quickOwnerScopeTransition(previousOwner, owner);
+    const changed = transition.changed;
     previousOwner = owner;
-    quickOwnerId = owner;
+    quickOwnerId = transition.userId;
     if (changed) {
       quickAccess = null;
       leaveMode();
@@ -579,7 +585,7 @@ async function useFile(f: File): Promise<void> {
   c.width = Math.round(img.naturalWidth * s);
   c.height = Math.round(img.naturalHeight * s);
   c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-  await run(c, generation);
+  await run(c, generation, f);
 }
 
 function stopCamera(): void {
@@ -598,6 +604,7 @@ function stopCamera(): void {
 async function run(
   src: HTMLCanvasElement,
   generation = ++quickScanGeneration,
+  sourceFile?: File,
 ): Promise<void> {
   if (generation !== quickScanGeneration) return;
   // A new attempt owns the active scan immediately. If detection fails, no
@@ -666,7 +673,19 @@ async function run(
   }
   // Softness/expression warnings remain non-blocking in the creator tool.
   // Reference group is explicitly selected by withSex; it is never inferred.
-  last = { lm, w: src.width, h: src.height, photo: src };
+  let imageSource: CalibrationImageSource | undefined;
+  if (mode === "calibrate") {
+    try {
+      imageSource = await fingerprintCalibrationImage(src, { originalFile: sourceFile });
+    } catch {
+      if (generation !== quickScanGeneration) return;
+      el.hintTitle.textContent = "The photo could not be linked to its points";
+      el.hintDetail.textContent = "Nothing was saved. Reopen the calibration tool in a secure browser window and upload the photo again.";
+      return;
+    }
+    if (generation !== quickScanGeneration || mode !== "calibrate") return;
+  }
+  last = { lm, w: src.width, h: src.height, photo: src, imageSource };
   // The photograph is taken, so whatever happens next is a different face and
   // gets asked afresh. Placed on the way out of every mode rather than in each
   // one, since "a scan finished" is exactly the condition that ends a face.
@@ -677,7 +696,7 @@ async function run(
 
 // The last analysed photo, kept so switching reference population re-scores it
 // rather than making someone shoot again.
-let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasElement } | null = null;
+let last: { lm: NormalizedLandmark[]; w: number; h: number; photo: HTMLCanvasElement; imageSource?: CalibrationImageSource } | null = null;
 
 interface QuickProfileScan {
   report: Report;
@@ -1144,6 +1163,7 @@ let pendingFrontShot: HTMLCanvasElement | null = null;
 // points — the one moment in the product where all of it is in hand at once,
 // which is exactly why the dual cut is exported from here and nowhere else.
 let pendingFrontLandmarks: NormalizedLandmark[] | null = null;
+let pendingFrontImageSource: CalibrationImageSource | undefined;
 let pendingSidePhoto: HTMLCanvasElement | null = null;
 let pendingSidePoints: SidePoints | null = null;
 let pendingSideCapture: CalibrationSideCapture | null = null;
@@ -1212,6 +1232,7 @@ function clearPending(): void {
   pendingFront = null;
   pendingFrontShot = null;
   pendingFrontLandmarks = null;
+  pendingFrontImageSource = undefined;
   pendingSide = null;
   pendingSidePhoto = null;
   pendingSidePoints = null;
@@ -1296,6 +1317,7 @@ function renderFaceSlots(): void {
           seedVersion: review.seedVersion,
           operatorVerified: review.verified,
           diagnostics: review.diagnostics,
+          imageSource: review.imageSource,
         };
         // Send the correction, if the operator consented to sharing it.
         //
@@ -1466,11 +1488,16 @@ function renderRatingStep(r: Report): void {
       Add it before revealing the result, or leave it empty to save just the measurements and points.</p>
       <div class="q-cal-input">
         <input type="number" id="q-cal-num" min="1" max="10" step="0.1" inputmode="decimal"
-               placeholder="Optional" autocomplete="off" />
+               placeholder="1-10" aria-label="Independent rating (optional)" autocomplete="off" />
+        <input type="text" id="q-cal-reference" placeholder="Reference ID, e.g. f01 (optional)"
+               aria-label="Reference ID (optional)" aria-describedby="q-cal-reference-hint"
+               maxlength="32" pattern="[a-z]([a-z0-9_]|-){0,31}" autocapitalize="none" spellcheck="false" autocomplete="off" />
         <input type="text" id="q-cal-label" placeholder="Label (optional, never exported)"
                maxlength="40" autocomplete="off" />
         <button type="button" class="btn pri" id="q-cal-save">Save face</button>
       </div>
+      <p class="q-cal-hint" id="q-cal-reference-hint">Use an anonymous Reference ID such as f01 to match this capture to your image set.
+      The ID is included in capture diagnostics; names, emails and the private label are not. Never put personal information in the ID.</p>
       <p class="q-cal-hint">Don't stretch a rating to fill the scale. An uncertain number
       is less useful than an unrated capture with carefully checked points.</p>
       <label class="q-cal-prov">
@@ -1484,11 +1511,20 @@ function renderRatingStep(r: Report): void {
     </div>`;
 
   const num = document.getElementById("q-cal-num") as HTMLInputElement;
+  const reference = document.getElementById("q-cal-reference") as HTMLInputElement;
   const label = document.getElementById("q-cal-label") as HTMLInputElement;
   const external = document.getElementById("q-cal-external") as HTMLInputElement;
   const msg = document.getElementById("q-cal-msg")!;
   num.focus();
   const store = (rating: number | null) => {
+    let referenceId: string | undefined;
+    try {
+      referenceId = calibrationReferenceId(reference.value);
+    } catch (error) {
+      msg.textContent = error instanceof Error ? error.message : "Check the Reference ID before saving.";
+      reference.focus();
+      return;
+    }
     try {
       const verdict = calibrationVerdictSnapshot(r, {
         front: pendingFront,
@@ -1508,6 +1544,7 @@ function renderRatingStep(r: Report): void {
         label.value.trim() || undefined,
         verdict.additionalSide ?? undefined,
         {
+          referenceId,
           thumb: pendingFrontShot ? (toAvatarThumb(pendingFrontShot) ?? undefined) : undefined,
           suspect: verdict.suspect,
           diagnostics: snapshotCalibrationDiagnostics({
@@ -1518,6 +1555,7 @@ function renderRatingStep(r: Report): void {
               height: pendingFrontShot.height,
               landmarks: pendingFrontLandmarks,
               report: pendingFront,
+              imageSource: pendingFrontImageSource,
             } : null,
             side: pendingSide && pendingSideCapture ? { ...pendingSideCapture, report: pendingSide } : null,
           }),
@@ -1525,8 +1563,10 @@ function renderRatingStep(r: Report): void {
       );
       clearPending();
       renderVerdictStep(r, rating, verdict);
-    } catch {
-      msg.textContent = "This face was not saved. Device storage may be full or unavailable. Your capture is still open; export the saved set before clearing space, then try again.";
+    } catch (error) {
+      msg.textContent = error instanceof Error
+        ? `${error.message} Your capture is still open.`
+        : "This face was not saved. Device storage may be full or unavailable. Your capture is still open; export the saved set before clearing space, then try again.";
     }
   };
   // One button, and it always stores. The old shape — a primary button that
@@ -1689,7 +1729,16 @@ function renderCalibrationSet(): void {
   // ends the current one.
   resetSexAsk();
   clearPending();
-  const faces = loadCalibrationSet();
+  let faces: RatedFace[];
+  try {
+    faces = loadCalibrationSetForExport();
+  } catch (error) {
+    el.calStep.textContent = "Saved set unavailable";
+    el.calBody.innerHTML = `<div class="q-cal-set"><p class="q-cal-msg" role="alert"></p><p class="q-cal-hint">Do not clear your browser data. Your saved set has not been changed.</p><button class="btn gho" id="q-cal-retry">Try reading the set again</button></div>`;
+    el.calBody.querySelector("[role=alert]")!.textContent = error instanceof Error ? error.message : "The saved calibration set could not be read.";
+    document.getElementById("q-cal-retry")!.onclick = renderCalibrationSet;
+    return;
+  }
   el.calStep.textContent = `${faces.length} face${faces.length === 1 ? "" : "s"}`;
   // Everything below counts only what may be fitted against. A withheld row is
   // still a scan worth keeping, but reporting it as progress towards a usable
@@ -1777,7 +1826,7 @@ function renderCalibrationSet(): void {
                   return `<div class="q-cal-row${fittable ? "" : " held"}">
                     <span>${
                       f.thumb ? `<img class="q-cal-thumb" src="${f.thumb}" alt="" />` : `<i class="q-cal-thumb none"></i>`
-                    }${f.label ? `${escapeHtml(f.label)} <small>(${f.id})</small>` : f.id}${flag}${suspectFlag}</span>
+                    }${f.label ? `${escapeHtml(f.label)} <small>(${f.id})</small>` : f.id}${validCalibrationReferenceId(f.referenceId) ? ` <small>Ref: ${escapeHtml(f.referenceId)}</small>` : ""}${flag}${suspectFlag}</span>
                     <span>${f.rating === null ? "–" : f.rating.toFixed(1)}</span>
                     <span>${f.scored.toFixed(1)}</span>
                     <span class="${gap !== null && Math.abs(gap) >= 1.5 ? "bad" : ""}">${
@@ -1803,8 +1852,8 @@ function renderCalibrationSet(): void {
         <button class="btn gho" id="q-cal-clear"${faces.length ? "" : " disabled"}>Clear the set</button>
       </div>
       <p class="q-cal-hint">Capture diagnostics include every row, even without a rating:
-      measurements, scoring references, and automatic/final points from new captures.
-      Photos and labels are omitted. Keep the export private. Older captures cannot recover
+      measurements, scoring references, automatic/final points and photo fingerprints from new captures.
+      Explicit anonymous Reference IDs are included; photos and private labels are omitted. Keep the export private. Older captures cannot recover
       points that were not saved. Corpus JSON is separate and includes only eligible ratings.</p>
       <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
     </div>`;
@@ -1833,12 +1882,22 @@ function renderCalibrationSet(): void {
     button.onclick = () => renderRatingEdit(button.dataset.edit!);
   }
   document.getElementById("q-cal-export")!.onclick = async () => {
-    const blob = new Blob([calibrationDiagnosticsJSON(loadCalibrationSet())], { type: "application/json" });
-    const outcome = await saveFile(blob, "truemax-calibration-diagnostics.json");
-    msg.textContent = outcomeMessage(outcome);
+    try {
+      const blob = new Blob([calibrationDiagnosticsJSON(loadCalibrationSetForExport())], { type: "application/json" });
+      const outcome = await saveFile(blob, "truemax-calibration-diagnostics.json");
+      msg.textContent = outcomeMessage(outcome);
+    } catch (error) {
+      msg.textContent = error instanceof Error ? error.message : "The diagnostics could not be exported. Your saved set has not been changed.";
+    }
   };
   document.getElementById("q-cal-copy")!.onclick = async () => {
-    const text = corpusJSON(loadCalibrationSet());
+    let text: string;
+    try {
+      text = corpusJSON(loadCalibrationSetForExport());
+    } catch (error) {
+      msg.textContent = error instanceof Error ? error.message : "The corpus could not be read. Your saved set has not been changed.";
+      return;
+    }
     try {
       await navigator.clipboard.writeText(text);
       msg.textContent = "Copied.";
@@ -2094,6 +2153,7 @@ function render(r: Report, photo: HTMLCanvasElement, animate = false): void {
     // The landmarks ride along for the Dual-View export; `last` is the scan
     // that produced this report, still current at this point in the flow.
     pendingFrontLandmarks = last?.lm ?? null;
+    pendingFrontImageSource = last?.imageSource;
     renderFaceSlots();
     return;
   }

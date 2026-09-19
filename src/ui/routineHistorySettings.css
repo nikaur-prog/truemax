@@ -1,0 +1,7 @@
+.routine-history-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
+.routine-history-actions button { min-height: 44px; padding: 10px 14px; border: 1px solid #d7dcd8; border-radius: 12px; background: #fff; color: #173e34; font: inherit; cursor: pointer; }
+.routine-history-actions button:disabled { opacity: .55; cursor: default; }
+.routine-history-preview { margin-top: 18px; padding: 16px; border: 1px solid #9fbdaf; border-radius: 14px; background: #f2f7f4; }
+.routine-history-preview[hidden] { display: none; }
+.routine-history-preview p, [data-routine-history] [role=status] { overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+@media (max-width: 480px) { .routine-history-actions button { width: 100%; } }

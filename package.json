@@ -8,6 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "tsx --test api/_*.test.ts src/engine/*.test.ts src/league/*.test.ts src/ui/*.test.ts",
     "preview": "vite preview",
+    "calibration:preview": "node tools/calibration-preview.mjs",
+    "test:calibration-preview": "node --test tools/calibration-preview.test.mjs",
     "postinstall": "node scripts/copy-wasm.mjs",
     "harvest": "node scripts/harvest-clips.mjs"
   },

@@ -21,6 +21,22 @@ test("result photos retain an encoded source and restore on every mobile return 
   assert.match(results, /restoreVisiblePhoto\(\)/);
 });
 
+test("main report drawing uses display rasters without changing retained photo or reviewed coordinates", () => {
+  assert.match(results, /function frontRaster\([\s\S]*?rasterSizeFor\(ctx!\.overlay, ctx!\.photoW, ctx!\.photoH\)/);
+  assert.match(results, /sidePointsForRaster\(ctx\.sidePoints, ctx\.sidePhoto\.width, ctx\.sidePhoto\.height, width, height\)/);
+  // The full-size values remain for retained photos, diagnostic geometry and
+  // normalized bounds, but must not drive animated drawing anymore.
+  assert.doesNotMatch(results, /(?:drawCalm|drawMeasurement|animateMeasurement|transitionRegion)\([^;]*ctx\.photoW/);
+  assert.doesNotMatch(results, /(?:drawSideMeasurement|animateSideMeasurement|drawSideRestingPoints)\([^;]*ctx\.sidePhoto\.width/);
+  assert.match(results, /paintPhotoCanvas\(dst, src\)/);
+  assert.match(results, /frontPhoto: frontPhoto,[\s\S]*sidePhoto: ctx\.sidePhoto \?\? null,[\s\S]*sidePoints: ctx\.sidePoints \?\? null/);
+});
+
+test("the photo caption cannot claim review for declined or legacy-unknown side points", () => {
+  assert.match(results, /cap\.textContent = ctx\.sideVerified === true\s*\? "POINTS CHECKED"\s*:\s*ctx\.sideVerified === false \? "POINTS NEED REVIEW" : "PROFILE CAPTURE"/);
+  assert.match(results, /const review = ctx\.sideVerified === true\s*\? "13 landmarks checked by you"\s*:\s*ctx\.sideVerified === false \? "Point placement not confirmed" : "Point review not recorded"/);
+});
+
 test("the side headline is one Profile tab backed by the side report", () => {
   assert.match(results, /mk\("Profile", "side"\)/);
   assert.doesNotMatch(results, /mk\("Overview", "side"\)/);

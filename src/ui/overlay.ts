@@ -1,5 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { FACE_CONNECTIONS } from "../engine/faceConnections.js";
+import { prefersReducedOverlayMotion } from "./measureOverlay.js";
+import { resetCanvasState } from "./interactiveRaster.js";
 
 // Landmark overlay: animated reveal during the scan beat, then a calm dim
 // state; region tabs re-light their own landmarks.
@@ -11,6 +13,49 @@ const DOT_HI = "#8FF3E0";
 const MESH_DIM = "rgba(255, 255, 255, 0.07)";
 
 const REVEAL_MS = 1400;
+
+type MeshCache = { signature: string; canvas: HTMLCanvasElement };
+const meshLayers = new WeakMap<HTMLCanvasElement, MeshCache>();
+const regionLayers = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+
+function sizeCanvas(canvas: HTMLCanvasElement, width: number, height: number): void {
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+}
+
+// Cache by actual coordinates as well as size. Landmark editing can mutate an
+// existing array, so reference equality alone would keep drawing the old face.
+function meshLayer(owner: HTMLCanvasElement, landmarks: NormalizedLandmark[], width: number, height: number): HTMLCanvasElement {
+  const signature = `${width}:${height}:` + landmarks.map((p) => `${p.x},${p.y}`).join(";");
+  let cached = meshLayers.get(owner);
+  if (!cached) {
+    cached = { signature: "", canvas: document.createElement("canvas") };
+    meshLayers.set(owner, cached);
+  }
+  if (cached.signature !== signature) {
+    sizeCanvas(cached.canvas, width, height);
+    const context = cached.canvas.getContext("2d")!;
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = MESH_DIM;
+    strokeMesh(context, landmarks, width, height);
+    cached.signature = signature;
+  }
+  return cached.canvas;
+}
+
+function regionLayer(owner: HTMLCanvasElement, landmarks: NormalizedLandmark[], width: number, height: number, excluded: Set<number>): HTMLCanvasElement {
+  let canvas = regionLayers.get(owner);
+  if (!canvas) { canvas = document.createElement("canvas"); regionLayers.set(owner, canvas); }
+  sizeCanvas(canvas, width, height);
+  const context = canvas.getContext("2d")!;
+  context.clearRect(0, 0, width, height);
+  context.drawImage(meshLayer(owner, landmarks, width, height), 0, 0);
+  const dotR = Math.max(1.1, width / 520);
+  for (let i = 0; i < landmarks.length; i++) {
+    if (!excluded.has(i)) dot(context, landmarks[i], width, height, dotR * .85, DOT_DIM);
+  }
+  return canvas;
+}
 
 export interface OverlayHandle {
   cancel(): void;
@@ -97,14 +142,12 @@ export function drawCalm(
   height: number,
   highlight?: number[],
 ): void {
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
+  sizeCanvas(canvas, width, height);
+  const ctx = resetCanvasState(canvas)!;
   const dotR = Math.max(1.1, width / 520);
   ctx.clearRect(0, 0, width, height);
 
-  ctx.strokeStyle = MESH_DIM;
-  strokeMesh(ctx, landmarks, width, height);
+  ctx.drawImage(meshLayer(canvas, landmarks, width, height), 0, 0);
 
   const hi = new Set(highlight ?? []);
   for (let i = 0; i < landmarks.length; i++) {
@@ -155,9 +198,12 @@ export function transitionRegion(
   from: number[] | undefined,
   to: number[] | undefined,
 ): OverlayHandle {
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
+  if (prefersReducedOverlayMotion()) {
+    drawCalm(canvas, landmarks, width, height, to);
+    return { cancel() {}, done: Promise.resolve() };
+  }
+  sizeCanvas(canvas, width, height);
+  const ctx = resetCanvasState(canvas)!;
   const dotR = Math.max(1.1, width / 520);
 
   // Order the incoming points by angle around their own centroid, which is the
@@ -179,6 +225,9 @@ export function transitionRegion(
   const outgoing = (from ?? []).filter((i) => !incoming.includes(i) && landmarks[i]);
   const hiSet = new Set(incoming);
   const outSet = new Set(outgoing);
+  // Mesh + stationary dots do not change during this transition. Rasterise
+  // them once; each animation frame draws only the departing/arriving points.
+  const background = regionLayer(canvas, landmarks, width, height, new Set([...hiSet, ...outSet]));
 
   // Where each point sits in the stagger, so both the dot and the edges that
   // touch it move on the same clock.
@@ -225,14 +274,7 @@ export function transitionRegion(
     const arrival = (i: number) => easeOut(clamp01((t - (slot.get(i) ?? 0) * SPREAD) / (1 - SPREAD)));
     ctx.clearRect(0, 0, width, height);
 
-    ctx.strokeStyle = MESH_DIM;
-    strokeMesh(ctx, landmarks, width, height);
-
-    // Everything that is neither arriving nor leaving
-    for (let i = 0; i < landmarks.length; i++) {
-      if (hiSet.has(i) || outSet.has(i)) continue;
-      dot(ctx, landmarks[i], width, height, dotR * 0.85, DOT_DIM);
-    }
+    ctx.drawImage(background, 0, 0);
 
     // Leaving: shrink and dim back to the calm state
     const outT = easeOut(t);
@@ -323,6 +365,7 @@ function strokeMesh(
   for (const { start, end } of FACE_CONNECTIONS.FACE_LANDMARKS_TESSELATION) {
     const a = landmarks[start];
     const b = landmarks[end];
+    if (!a || !b || ![a.x, a.y, b.x, b.y].every(Number.isFinite)) continue;
     ctx.moveTo(a.x * width, a.y * height);
     ctx.lineTo(b.x * width, b.y * height);
   }

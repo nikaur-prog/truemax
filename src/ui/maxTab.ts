@@ -7,6 +7,7 @@ import {
 } from "../engine/entitlement.js";
 import type { Entitlement } from "../engine/entitlement.js";
 import { maxCharacterMarkup, wireMaxInteractions } from "./maxCharacter.js";
+import { mountMaxAvatar3D } from "./maxAvatar3d.js";
 import { openMaxChat } from "./maxChat.js";
 import { MAX_MONTHLY } from "./onboardingFunnel.js";
 import { readProtocols } from "../engine/protocol.js";
@@ -16,10 +17,13 @@ import {
   MAX_CONVERSATIONS_CHANGED,
   listMaxConversations,
   syncMaxPlanItems,
+  mostRecentCoachConversation,
 } from "../engine/maxConversations.js";
 import type { MaxConversationSummary, MaxPlanItem } from "../engine/maxConversations.js";
 import { MAX_DAILY_MESSAGES } from "../engine/maxAllowance.js";
-import { contextFromStoredScan } from "../engine/maxContext.js";
+import { buildCoachingSnapshot, contextFromStoredScan } from "../engine/maxContext.js";
+import { loadProfile } from "../engine/goals.js";
+import { activeScanOwner } from "../engine/scanScope.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 import { ownScans, readAllHistory, readOwnComparableHistory } from "../engine/history.js";
 import { DEFAULT_VERDICT_TONE, loadVerdictTone } from "../engine/analysisMode.js";
@@ -68,12 +72,12 @@ const PREVIEW = [
   { who: "you", text: "What should I actually focus on first?" },
   {
     who: "max",
-    text: "One thing at a time. Your scan ranks every measurement, so we start where the movement is cheapest and the payoff is visible.",
+    text: "Start with the goal you care about most. Then choose a routine you can follow consistently. A low measurement alone is not a reason to change something.",
   },
   { who: "you", text: "How long until it shows?" },
   {
     who: "max",
-    text: "Weeks, not days. And I will tell you straight whether it moved, because I re-read the same numbers every scan.",
+    text: "That depends on the routine. We can record when you start and review your experience alongside comparable scans, without treating a photo change as proof it worked.",
   },
 ];
 
@@ -106,10 +110,10 @@ function performanceItems(memory: readonly MaxPlanItem[] = []): string {
     .map((item) => ({
       title: item.title,
       state: item.status === "not_working"
-        ? "Needs an alternative"
+        ? "Saved note: you reported a problem"
         : item.status === "paused"
-          ? "Paused"
-          : "In your plan",
+          ? "Saved note: paused"
+          : "Saved chat note, not a tracked routine",
     }));
   const items = [...local, ...remote];
   if (!items.length) {
@@ -149,9 +153,10 @@ export function maxTabMarkup(paid: boolean): string {
   if (paid) {
     return `<div class="maxtab">
       <div class="maxtab-stage">
-        <span class="maxtab-face">${maxCharacterMarkup({ mood: "happy", waving: true })}</span>
+        <span class="maxtab-face">${maxCharacterMarkup({ mood: "happy" })}</span>
         <h2>Ask Coach Max anything</h2>
-        <p>He has read every measurement in your scans. Plans, priorities, what moved and what did not: that is what he is for.</p>
+        <p>Discuss your goals, current routine and available scan readings. Keep the plan practical and review what you have actually tried.</p>
+        <div class="maxtab-plan-actions"><button type="button" class="btn primary" data-build-plan>Build my plan</button><button type="button" class="btn" data-choose-routines>Choose routines</button></div>
       </div>
       ${conversationHistoryMarkup()}
       ${performanceTrackerMarkup()}
@@ -198,7 +203,7 @@ function dashboardContext(): { context: MaxChatContext | null; greeting: string 
   if (!latest) {
     return {
       context: null,
-      greeting: "Hey, I'm Max. Run a scan and I'll talk you through your exact numbers. Until then, ask me anything.",
+      greeting: "Ask about your goals or current routine. A completed scan adds measurement context.",
     };
   }
   const activePlan = readProtocols()
@@ -216,14 +221,15 @@ function dashboardContext(): { context: MaxChatContext | null; greeting: string 
   const when = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(latest.date));
   return {
     context,
-    greeting: `Hey, I'm Max. I've got your scan from ${when} open. Ask me anything about it.`,
+    greeting: `Latest scan: ${when}. This view includes summary scores; open the full report for individual measurements.`,
   };
 }
 
 export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
   const root = panel.querySelector<HTMLElement>(".maxtab");
   if (!root) return;
-  wireMaxInteractions(root.querySelector<HTMLElement>(".maxtab-face"));
+  if (opts.paid) mountMaxAvatar3D(root.querySelector<HTMLElement>(".maxtab-stage .maxtab-face"), { state: "idle" });
+  else wireMaxInteractions(root.querySelector<HTMLElement>(".maxtab-face"));
 
   const form = root.querySelector<HTMLFormElement>(".maxtab-composer")!;
   const input = form.querySelector<HTMLInputElement>("input")!;
@@ -236,20 +242,57 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
       // Starting a protocol adds its tick immediately; judging removes it.
       mountDailyTicks(root.querySelector<HTMLElement>("[data-performance-ticks]"));
     });
-    // Any intent — focus, tap, submit — opens the real chat. The composer here
-    // is a doorknob shaped like the door.
-    const open = () => {
+    // Let the composer work as an actual text field. Opening on focus used to
+    // discard typed questions and could reopen chat when focus returned on close.
+    const owner = activeScanOwner();
+    root.querySelector<HTMLButtonElement>("[data-build-plan]")?.addEventListener("click", async () => {
+      try {
+        const { openMaxPlanBrief } = await import("./maxPlanBrief.js");
+        if (!root.isConnected || owner !== activeScanOwner()) return;
+        openMaxPlanBrief((question) => {
+          if (!root.isConnected || owner !== activeScanOwner()) return;
+          const latest = dashboardContext();
+          openMaxChat(latest.context, { source: "dashboard", initialQuestion: question, greeting: latest.greeting });
+        });
+      } catch {
+        const slot = root.querySelector<HTMLElement>("[data-max-history]");
+        if (slot && root.isConnected && owner === activeScanOwner()) slot.textContent = "The plan builder could not load. Try again.";
+      }
+    });
+    root.querySelector<HTMLButtonElement>("[data-choose-routines]")?.addEventListener("click", async () => {
+      try {
+        const { openMaxRoutinePicker } = await import("./maxRoutinePicker.js");
+        if (root.isConnected && owner === activeScanOwner()) openMaxRoutinePicker();
+      } catch {
+        const slot = root.querySelector<HTMLElement>("[data-max-history]");
+        if (slot && root.isConnected && owner === activeScanOwner()) slot.textContent = "Routine options could not load. Try again.";
+      }
+    });
+    let opening = false;
+    const open = async (fresh = false, initialQuestion?: string) => {
+      if (opening) return;
+      opening = true;
+      const submittedDraft = input.value;
       input.blur();
-      const latest = dashboardContext();
-      openMaxChat(latest.context, { greeting: latest.greeting, source: "dashboard" });
+      try {
+        const saved = fresh ? undefined : mostRecentCoachConversation((await listMaxConversations()).conversations);
+        if (!root.isConnected || owner !== activeScanOwner()) return;
+        const latest = dashboardContext();
+        const opened = openMaxChat(latest.context, { greeting: latest.greeting, source: "dashboard", conversationId: saved?.id, initialQuestion });
+        // Preserve edits made during the history request, and drafts that were
+        // not delivered because another action opened a chat first.
+        if (opened && initialQuestion && input.value === submittedDraft) input.value = "";
+      } catch {
+        const slot = root.querySelector<HTMLElement>("[data-max-history]");
+        if (slot && owner === activeScanOwner()) slot.textContent = "Your recent chat could not load. Try again, or choose New chat.";
+      } finally { opening = false; }
     };
-    input.addEventListener("focus", open);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      open();
+      if (input.value.trim()) void open(false, input.value.trim());
     });
 
-    root.querySelector<HTMLButtonElement>("[data-max-new]")?.addEventListener("click", open);
+    root.querySelector<HTMLButtonElement>("[data-max-new]")?.addEventListener("click", () => { void open(true); });
     const history = root.querySelector<HTMLElement>("[data-max-history]");
     const renderHistory = (conversations: readonly MaxConversationSummary[]): void => {
       if (!history) return;
@@ -266,6 +309,7 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
           .format(new Date(conversation.last_message_at));
         button.innerHTML = `<span><b>${escapeHTML(conversation.title)}</b><small>${conversation.source === "post_analysis" ? "Post-analysis" : "Coach"} · ${when}</small></span><i aria-hidden="true">›</i>`;
         button.onclick = () => {
+          if (!panel.isConnected || activeScanOwner() !== owner) return;
           const latest = dashboardContext();
           openMaxChat(latest.context, {
             conversationId: conversation.id,
@@ -279,12 +323,24 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
     const refresh = (): void => {
       void listMaxConversations()
         .then((result) => {
-          if (!panel.isConnected) return;
+          if (!panel.isConnected || activeScanOwner() !== owner) return;
           renderHistory(result.conversations);
           if (items) items.innerHTML = performanceItems(result.planItems);
+          mountDailyTicks(root.querySelector<HTMLElement>("[data-performance-ticks]"));
+          mountProtocolCard(root.querySelector<HTMLElement>("[data-performance-due]"), null, () => {
+            if (items) items.innerHTML = performanceItems(result.planItems);
+            mountDailyTicks(root.querySelector<HTMLElement>("[data-performance-ticks]"));
+          });
+          const restoration = result.routineRestoration;
+          if (restoration?.error || restoration?.historyPartial) {
+            const note = document.createElement("p");
+            note.className = "maxtab-history-empty";
+            note.textContent = restoration.error ?? "Routines restored from your account include recent check-ins, not a complete daily history.";
+            items?.append(note);
+          }
         })
         .catch((error) => {
-          if (!history || !panel.isConnected) return;
+          if (!history || !panel.isConnected || activeScanOwner() !== owner) return;
           history.innerHTML = `<p class="maxtab-history-empty">${escapeHTML(error instanceof Error ? error.message : "Your chats could not be loaded.")}</p>`;
         });
     };
@@ -296,9 +352,7 @@ export function wireMaxTab(panel: HTMLElement, opts: { paid: boolean }): void {
       refresh();
     };
     window.addEventListener(MAX_CONVERSATIONS_CHANGED, onChanged);
-    const localPlan = readProtocols()
-      .filter((protocol) => protocol.status !== "declined" && protocol.status !== "judged")
-      .map((protocol) => ({ title: protocol.title }));
+    const localPlan = buildCoachingSnapshot(loadProfile(), readProtocols()).routines;
     void syncMaxPlanItems(localPlan).catch(() => undefined).finally(refresh);
     return;
   }

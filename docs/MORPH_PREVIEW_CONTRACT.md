@@ -1,5 +1,10 @@
 # Goal preview contract
 
+> Status clarified, 19 September 2026: Saved-job recovery is implemented locally. New rendering is now default-off on the server as well as the frontend. Both generation endpoints require `GOAL_PREVIEW_RENDER_ENABLED=1` before any request data, database client, allowance or provider work is reached. This release does not enable either switch or change deployed environment values. Server atomic idempotency and live provider/storage/validation gates remain mandatory. See the
+> [current continuation handoff](CLAUDE_HANDOFF_2026-09-11.md) for branch preservation,
+> verification evidence and the next execution order. Historical details below
+> do not imply that the whole roadmap has shipped.
+
 The first release separates the product's promise from the image renderer.
 `src/engine/morphPlan.ts` owns what may change, how far a measurement may move,
 and what repeated evidence completes a goal. A future rendering service may
@@ -20,8 +25,15 @@ promises are omitted until repeatability, realistic target ranges and the reward
 service are validated. Routine/streak rewards are separate.
 
 The current release can ship the target map with image rendering disabled.
-`VITE_MORPH_PREVIEW=1` should be set only after the endpoint and all validation
-gates below are live.
+`VITE_MORPH_PREVIEW=1` exposes the frontend creation controls, while the separate
+server switch `GOAL_PREVIEW_RENDER_ENABLED=1` permits new renders through both
+`POST /api/morph-preview` and the legacy `POST /api/goal-preview`. Neither switch
+should be set until the endpoint and all validation gates below are live.
+When the server switch is missing or not exactly `1`, either POST returns a
+non-cacheable 503 with `requestRejected: true`: no render, allowance claim,
+source-photo read or job is started. Existing authenticated saved-preview reads,
+validation updates, deletion and consent revocation are not disabled by this
+generation-only switch.
 
 ## Request
 
@@ -71,11 +83,64 @@ ignores cancellation. Each consent API request has its own 15-second budget;
 there is no timer on the person's reading or decision. Consent has focus entry,
 keyboard containment, Escape dismissal and safe return to its opener.
 
-If the server has already supplied a job ID, Check existing preview resumes that
-job in the current report instead of buying another render. This is not durable
-resume after reload. The existing synchronous POST cannot be recovered by job ID
-if it times out before returning one; a future accepted-job endpoint and saved-job
-picker are still needed for that case.
+## Saved-job recovery
+
+Check saved previews is an explicit metadata-only read. Before a new POST, the
+client also completes the same read-only preflight. Neither mount nor reload
+automatically starts a render. `GET /api/morph-preview?scan=<id>&recipe=<sha256>`
+returns at most 50 account-owned candidates for the current contract/catalogue,
+scan, variant, goals, views, signed effect amounts and exact baseline/target
+numbers. Labels and other display text do not affect the hash. An incomplete
+bounded lookup returns an error rather than an empty list that could enable a
+duplicate render. Metadata contains only job ID, status, creation and expiry.
+
+The picker selects a saved job; Check existing preview polls it with both the
+scan and recipe key. The server rechecks origin, authentication, Max entitlement,
+adult access, consent, ownership, exact recipe, expiry and expected private image
+paths before loading pixels. Rejected/failed/expired jobs are not ordinary picker
+candidates. Kept previews follow their stored `kept_until`; invalid dates fail
+closed. Deleted or mismatched jobs return no image. GET never claims an allowance,
+inserts/updates a job, or calls a renderer.
+
+Before POST, the client saves an owner/scan/recipe-scoped local marker containing
+only a timestamp and a random request UUID. No pixels, measurements, token or
+validation result are stored in it. The POST stores that UUID in the existing
+private job spec; no new table or migration is required. After a timeout before
+the job ID arrives, a reload can query `&request=<uuid>` to discover that exact
+request, including its confirmed failed/rejected/expired terminal job. The
+request UUID is correlation, not a server idempotency guarantee.
+
+An explicit server `requestRejected: true` means rejection before a job was
+created, and permits a later deliberate retry. An identified terminal job or
+validated ready result also resolves the local marker. Network/gateway failures,
+malformed replies, unavailable lookup, deletion/404 or an indefinitely missing
+request do not silently clear it. There is no timeout that automatically buys
+another render. A missing request stays check-only and directs the member to
+support for reconciliation if it remains missing. A recovered terminal job must
+be checked first; a separate later click can create new work.
+
+Recovery still uses the original scan photos/landmarks to complete pending device
+checks; missing originals must be reopened before an image can be accepted. It
+does not restart a terminated synchronous renderer. Existing cleanup marks stuck
+generating jobs failed; an async accepted-job worker would be separate work.
+Concurrent tabs/devices are not protected by a transactional idempotency key, and
+clearing/unavailable browser storage loses an unknown-request marker. The server
+lookup still finds already-persisted active jobs, but this change does not claim
+exactly-once paid generation across those cases. Keep rendering disabled until
+the release gates below and an operational recovery review are complete.
+
+### Local verification (2026-09-10)
+
+The recovery suites execute the real API handler against query/storage doubles,
+the real recipe canonicalization, client response parser, and component lifecycle.
+They cover owner isolation/change, same-owner auth refresh, exact recipe/stale
+contract, rejected/expired/deleted jobs, missing paired images, bounded search,
+pre-job rejection, unknown POST/reload, and double-click/cancellation.
+`node tools/morph-recovery-smoke.mjs` runs the actual component and HTTP client in
+Chromium at 1440px and 390px with only synthetic local responses. Saved-list →
+select → matched GET and unknown POST → reload → check-only → recovery both pass;
+no real provider, account, database or private photographs are used. These checks
+do not constitute deployed database/RLS, provider timing or identity validation.
 
 ## What the server asserts, and what the device must
 

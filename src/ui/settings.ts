@@ -22,6 +22,8 @@ import { deleteBodyProfile, fetchBodyProfile, type ServerBodyProfile } from "../
 import { bodyMetricUsable, toImperial } from "../engine/bodyUnits.js";
 import { isAdult } from "../engine/age.js";
 import { openBodyProfileDialog } from "./bodyProfileDialog.js";
+import { mountRoutineHistorySettings } from "./routineHistorySettings.js";
+import { mountThemeSetting } from "./theme.js";
 import {
   readGoalPreviewConsent,
   revokeGoalPreviewConsent,
@@ -59,6 +61,8 @@ import {
 // ---------------------------------------------------------------------------
 
 let host: HTMLDivElement | null = null;
+let disposeRoutineHistory: (() => void) | null = null;
+let disposeThemeSetting: (() => void) | null = null;
 
 const esc = (value: string): string =>
   value.replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char] || char);
@@ -67,6 +71,10 @@ const toggle = (values: string[], value: string): string[] =>
   values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 
 function close(): void {
+  disposeThemeSetting?.();
+  disposeThemeSetting = null;
+  disposeRoutineHistory?.();
+  disposeRoutineHistory = null;
   host?.remove();
   host = null;
   document.body.classList.remove("funnel-open");
@@ -227,6 +235,8 @@ export async function openSettings(user: User): Promise<void> {
 
   const draw = () => {
     if (host !== activeHost || !activeHost.isConnected) return;
+    disposeThemeSetting?.();
+    disposeRoutineHistory?.();
     const tone = loadVerdictTone();
     activeHost.innerHTML = `<div class="trial-shell settings-shell" role="dialog" aria-modal="true" aria-labelledby="set-title">
       <header class="trial-nav">
@@ -237,6 +247,12 @@ export async function openSettings(user: User): Promise<void> {
         <span class="trial-eyebrow">YOUR PROFILE</span>
         <h2 id="set-title">What we know, and what you'd rather we didn't bring up.</h2>
         <p class="trial-note">Nothing here changes a measurement. Your score is whatever your face measures; this is what the app does with it afterwards.</p>
+
+        <section class="set-group" aria-labelledby="set-appearance-title">
+          <h3 id="set-appearance-title">Appearance</h3>
+          <p class="set-hint">Choose light or dark. Saved automatically on this device.</p>
+          <div data-theme-setting></div>
+        </section>
 
         <section class="set-group">
           <h3>Who you are</h3>
@@ -315,6 +331,7 @@ export async function openSettings(user: User): Promise<void> {
           <p class="set-hint">This permission is separate from side-point placement and correction feedback. Revoking it deletes every generated preview TrueMax stores and prevents another render until you choose it again.</p>
           <div id="set-preview-state">${previewSectionMarkup()}</div>
         </section>
+        <section class="set-group" data-routine-history></section>
       </main>
       <p class="trial-status" role="status"></p>
       <footer class="trial-actions">
@@ -324,6 +341,8 @@ export async function openSettings(user: User): Promise<void> {
     </div>`;
 
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);
+    disposeThemeSetting = mountThemeSetting(activeHost.querySelector("[data-theme-setting]"));
+    disposeRoutineHistory = mountRoutineHistorySettings(activeHost.querySelector("[data-routine-history]"), user.id);
     activeHost.querySelector("#set-cancel")?.addEventListener("click", close);
 
     for (const group of activeHost.querySelectorAll<HTMLElement>("[data-field]")) {

@@ -21,6 +21,8 @@ import { countUp } from "./countUp.js";
 import { maxTabMarkup, wireMaxTab } from "./maxTab.js";
 import { celebrityPortrait } from "../engine/celebrityPortraits.js";
 import { celebrityPortraitImage, celebrityPortraitCredits, installCelebrityPortraitFallback, PORTRAIT_DISCLOSURE } from "./celebrityPortrait.js";
+import { celebrityReferenceEstimate } from "./celebrityReferenceScore.js";
+import "./celebrityReferenceScore.css";
 
 // ---------------------------------------------------------------------------
 // The dashboard — the app's home.
@@ -181,8 +183,14 @@ export function openDashboard(opts: {
     <div class="dash-inner">
       <header class="dash-head">
         <div class="dash-brand-row dash-anim" style="--d:0ms">
-          <span class="wordmark dash-logo ${brandClass(dashboardBrand)}">${logoMarkup()}</span>
-          ${dashboardBrand === "max" ? `<span class="max-ai-badge"><i></i>MAX AI · YOUR ASSISTANT</span>` : ""}
+          <div class="header-home-group">
+            <button class="wordmark dash-logo ${brandClass(dashboardBrand)}" type="button" data-goto="home" aria-label="TrueMax home dashboard">${logoMarkup()}</button>
+            <button class="header-home-link" type="button" data-goto="home" aria-label="Go to home dashboard" title="Dashboard">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 10.6 12 4l8 6.6"/><path d="M6 9.6V20h12V9.6"/>
+              </svg>
+            </button>
+          </div>
           ${opts.onSettings ? (() => {
             // The profile button IS the person once a face exists: their own
             // first scan, adopted automatically, changeable in settings. The
@@ -263,7 +271,16 @@ export function openDashboard(opts: {
     opts.onScan();
   };
   for (const btn of overlay.querySelectorAll<HTMLElement>("[data-goto]")) {
-    btn.onclick = () => showView(btn.dataset.goto as ViewName);
+    btn.onclick = () => {
+      const destination = btn.dataset.goto as ViewName;
+      showView(destination);
+      // Header Home is an explicit return to the start, even when Home is
+      // already active. The bottom tabs still restore each panel's position.
+      if (destination === "home" && btn.closest(".header-home-group") && overlay) {
+        overlay.scrollTop = 0;
+        scrollMemory.set("home", 0);
+      }
+    };
   }
   overlay.querySelector("#dash-celeb-strip")?.addEventListener("click", () => showView("faces"));
   // The dashboard stays open behind it: settings is a panel over your own
@@ -316,7 +333,7 @@ export function activeView(): ViewName | null {
 // instead of merely testable.
 function viewDirection(from: ViewName, to: ViewName): number {
   if (!overlay) return 1;
-  const order = [...overlay.querySelectorAll<HTMLElement>("[data-goto]")].map((b) => b.dataset.goto);
+  const order = [...overlay.querySelectorAll<HTMLElement>(".dash-bar [data-goto]")].map((b) => b.dataset.goto);
   return Math.sign(order.indexOf(to) - order.indexOf(from));
 }
 
@@ -359,15 +376,14 @@ export function showView(name: ViewName): void {
   next.classList.add(dir > 0 ? "from-right" : "from-left");
 
   currentView = name;
-  for (const btn of overlay.querySelectorAll<HTMLElement>("[data-goto]")) {
+  for (const btn of overlay.querySelectorAll<HTMLElement>('.dash-bar [data-goto][role="tab"]')) {
     btn.setAttribute("aria-selected", btn.dataset.goto === name ? "true" : "false");
   }
   overlay.scrollTop = scrollMemory.get(name) ?? 0;
 }
 
 export function close(): void {
-  detailEl?.remove();
-  detailEl = null;
+  closeCelebDetail(false);
   overlay?.remove();
   overlay = null;
   currentView = "home";
@@ -721,11 +737,22 @@ export function openCelebSearch(): void {
   showView("faces");
 }
 
-// Raw reference measurements, without turning a real person's name into an
-// overall attractiveness verdict. The data exists for per-metric comparisons.
+// Stored reference measurements and their current measurement-only estimate.
+// This is not a fresh scan of the displayed portrait or a complete face score.
 let detailEl: HTMLDivElement | null = null;
-function openCelebDetail(celebrity: CelebEntry): void {
+let detailReturnFocus: HTMLElement | null = null;
+function closeCelebDetail(restoreFocus = true): void {
+  const target = detailReturnFocus;
+  detailReturnFocus = null;
   detailEl?.remove();
+  detailEl = null;
+  if (restoreFocus && target?.isConnected) target.focus({ preventScroll: true });
+}
+
+function openCelebDetail(celebrity: CelebEntry): void {
+  closeCelebDetail(false);
+  detailReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const estimate = celebrityReferenceEstimate(celebrity);
   const measured = METRICS
     .filter((def) => def.view === "front" && Number.isFinite(celebrity.metrics[def.id]))
     .sort((a, b) => (REGION_LABEL[a.region] ?? a.region).localeCompare(REGION_LABEL[b.region] ?? b.region));
@@ -740,7 +767,7 @@ function openCelebDetail(celebrity: CelebEntry): void {
   detailEl.className = "dash celeb-detail";
   detailEl.innerHTML = `
     <div class="dash-inner">
-      <button class="hist-close" aria-label="Close">✕</button>
+      <button class="hist-close" type="button" aria-label="Close reference profile">✕</button>
       <div class="cd-head">
         <div class="cd-photo cd-reference" aria-hidden="true">
           <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -757,11 +784,30 @@ function openCelebDetail(celebrity: CelebEntry): void {
         </div>
       </div>
 
+      <section class="cd-reference-estimate" aria-label="Front reference estimate">
+        <div>
+          <span class="klabel">Front reference estimate</span>
+          <div class="cd-score">${estimate.score == null ? "Not available" : `${estimate.score.toFixed(1)}<small>/10</small>`}</div>
+        </div>
+        <div>
+          <p class="cd-sub">Current TrueMax model · measurement-only · ${celebrity.sex === "male" ? "men's" : "women's"} reference</p>
+          <p class="cd-estimate-note">Calculated from stored front measurements, not a fresh scan.
+            Side measurements and the outline descriptor are not included, so a new scan can give a different score.</p>
+        </div>
+      </section>
+
       <p class="portrait-disclosure">${PORTRAIT_DISCLOSURE}</p>
       ${celebrityPortraitCredits([celebrity.name])}
       <div class="cd-measure-groups">
         ${[...grouped.entries()].map(([region, defs]) => `<section class="cd-measure-group">
-          <h2 class="cd-h2">${escapeHtml(region)}</h2>
+          <div class="cd-measure-heading">
+            <h2 class="cd-h2">${escapeHtml(region)}</h2>
+            ${(() => {
+              const score = estimate.regions[defs[0].region];
+              return score == null ? `<span class="cd-measure-score is-unavailable">Measurements only</span>`
+                : `<span class="cd-measure-score">${score.toFixed(1)}<small>/10 estimate</small></span>`;
+            })()}
+          </div>
           ${defs.map((def) => `<div class="cd-measure">
             <span>${escapeHtml(def.name)}</span>
             <b>${celebrity.metrics[def.id].toFixed(def.decimals)}${escapeHtml(def.unit)}</b>
@@ -769,15 +815,20 @@ function openCelebDetail(celebrity: CelebEntry): void {
         </section>`).join("")}
       </div>
 
-      <p class="cd-note">These are raw per-metric readings, not an attractiveness verdict.
-        A different photograph can move them. The displayed reference photo is not a claim
-        that these readings were measured from that photo.</p>
+      <p class="cd-note">The estimate uses the current TrueMax scoring model, which is still being calibrated.
+        It is not an independently validated attractiveness rating. Regions with insufficient reliability show measurements only.
+        The displayed reference photo is not a claim that these readings were measured from that photo.</p>
     </div>`;
   document.body.appendChild(detailEl);
-  detailEl.querySelector(".hist-close")!.addEventListener("click", () => {
-    detailEl?.remove();
-    detailEl = null;
+  const closeButton = detailEl.querySelector<HTMLButtonElement>(".hist-close")!;
+  closeButton.addEventListener("click", () => closeCelebDetail());
+  detailEl.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeCelebDetail();
   });
+  closeButton.focus({ preventScroll: true });
 }
 
 function celebCard(celebrity: CelebEntry, index: number): string {

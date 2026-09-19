@@ -16,6 +16,8 @@ import { fmt, metricTrait, rankShort } from "./templates.js";
 import { metricRead } from "../engine/metricReads.js";
 import { scoreTone } from "./scoreTone.js";
 import { celebrityPortraitImage, celebrityPortraitCredits, installCelebrityPortraitFallback } from "./celebrityPortrait.js";
+import { createStagePaint } from "./stagePaint.js";
+import { rasterSizeFor, sidePointsForRaster } from "./interactiveRaster.js";
 
 // ---------------------------------------------------------------------------
 // One measurement, opened.
@@ -77,11 +79,10 @@ export function stageViewFor(
   hasSide: boolean,
   hasFront: boolean,
 ): "side" | "front" | null {
-  // A side metric is drawn on the profile when the profile is here; without it
-  // the front stage still shows WHERE the number lives via the region fallback,
-  // which is what the main pane does too.
-  if (hasSideOverlay(m.def.id) && hasSide) return "side";
-  return hasFront ? "front" : hasSide ? "side" : null;
+  // A photograph of the other view cannot substantiate this construction.
+  // Keep the reading and navigation available, but explain the missing view.
+  if (m.def.view === "side" || hasSideOverlay(m.def.id)) return hasSide ? "side" : null;
+  return hasFront ? "front" : null;
 }
 
 /** Step through the deck without wrapping — a counter that wraps lies. */
@@ -108,18 +109,7 @@ let opts: MetricDetailOpts | null = null;
 let index = 0;
 let tab: "overview" | "celebs" = "overview";
 let shownStage: "side" | "front" | null = null;
-// The pending photograph swap, and the render it belongs to.
-//
-// The swap is deferred 150ms so the stage can dip through black, and the
-// timeout captured the metric, the view and the zoom. Untracked, a second
-// showAt inside that window — arrow-key autorepeat fires every ~30-50ms, and a
-// swipe-back or a double-tap on next/prev do it just as easily — let the older
-// callback land AFTER the newer one, painting the previous measurement's
-// photograph and drawing under the new metric's header. Cancelled on every new
-// render and on close, and version-guarded so a timer that somehow survives
-// still refuses to paint over a render it does not belong to.
-let swapTimer: number | null = null;
-let generation = 0;
+let stagePaint: ReturnType<typeof createStagePaint> | null = null;
 // Where focus came from, so closing puts a keyboard user back on their row
 // rather than at the top of the document.
 let opener: HTMLElement | null = null;
@@ -131,9 +121,8 @@ export function isMetricDetailOpen(): boolean {
 export function closeMetricDetail(): void {
   fade?.cancel();
   fade = null;
-  if (swapTimer !== null) window.clearTimeout(swapTimer);
-  swapTimer = null;
-  generation++;
+  stagePaint?.cancel();
+  stagePaint = null;
   active?.remove();
   active = null;
   opts = null;
@@ -322,13 +311,14 @@ function paintStage(view: "side" | "front"): void {
   const photo = active.querySelector<HTMLCanvasElement>(".mdx-photo")!;
   const src = view === "side" ? opts.sidePhoto : opts.frontPhoto;
   if (!src) return;
-  photo.width = src.width;
-  photo.height = src.height;
-  photo.getContext("2d")!.drawImage(src, 0, 0);
   zoom.style.aspectRatio = `${src.width} / ${src.height}`;
+  const size = rasterSizeFor(photo, src.width, src.height);
+  if (photo.width !== size.width) photo.width = size.width;
+  if (photo.height !== size.height) photo.height = size.height;
+  photo.getContext("2d")!.drawImage(src, 0, 0, size.width, size.height);
   const overlay = active.querySelector<HTMLCanvasElement>(".mdx-overlay-canvas")!;
-  overlay.width = src.width;
-  overlay.height = src.height;
+  if (overlay.width !== size.width) overlay.width = size.width;
+  if (overlay.height !== size.height) overlay.height = size.height;
   shownStage = view;
 }
 
@@ -337,9 +327,12 @@ function drawMetric(m: ScoredMetric, view: "side" | "front"): void {
   const overlay = active.querySelector<HTMLCanvasElement>(".mdx-overlay-canvas")!;
   fade?.cancel();
   if (view === "side" && opts.sidePoints && opts.sidePhoto) {
-    fade = animateSideMeasurement(overlay, opts.sidePoints, opts.sidePhoto.width, opts.sidePhoto.height, m);
+    const size = rasterSizeFor(overlay, opts.sidePhoto.width, opts.sidePhoto.height);
+    const points = sidePointsForRaster(opts.sidePoints, opts.sidePhoto.width, opts.sidePhoto.height, size.width, size.height);
+    fade = animateSideMeasurement(overlay, points, size.width, size.height, m);
   } else if (opts.landmarks && opts.frontPhoto) {
-    fade = animateMeasurement(overlay, opts.landmarks, opts.frontPhoto.width, opts.frontPhoto.height, m);
+    const size = rasterSizeFor(overlay, opts.frontPhoto.width, opts.frontPhoto.height);
+    fade = animateMeasurement(overlay, opts.landmarks, size.width, size.height, m);
   }
 }
 
@@ -350,10 +343,11 @@ function showAt(next: number): void {
   index = next;
   const m = opts.metrics[index];
   const view = stageViewFor(m, !!(opts.sidePhoto && opts.sidePoints), !!(opts.frontPhoto && opts.landmarks));
-  // A render supersedes any swap still pending from the last one.
-  if (swapTimer !== null) window.clearTimeout(swapTimer);
-  swapTimer = null;
-  const mine = ++generation;
+  // Cancel the old drawing immediately, including during a deferred photo
+  // swap. The swap owner also restores opacity on rapid reversals.
+  stagePaint?.cancel();
+  fade?.cancel();
+  fade = null;
 
   // NO STAGE IS NOT NO CARD. This used to `return` before writing a single
   // word, so a report whose front capture is unavailable — a documented state,
@@ -364,6 +358,9 @@ function showAt(next: number): void {
   } else {
     active.querySelector<HTMLElement>(".mdx-stage")!.classList.remove("mdx-nostage");
   }
+  const unavailablePhoto = active.querySelector<HTMLElement>(".mdx-unavailable")!;
+  unavailablePhoto.hidden = !!view;
+  unavailablePhoto.textContent = `The ${m.def.view === "side" || hasSideOverlay(m.def.id) ? "side" : "front"} photo for this measurement isn't available in this saved report. You can still read the measurement and move to the next one.`;
 
   // Header
   active.querySelector(".mdx-count")!.textContent = `${index + 1} / ${opts.metrics.length}`;
@@ -373,7 +370,7 @@ function showAt(next: number): void {
     [
       opts.deckLabel?.toUpperCase(),
       REGION_NAMES[shownRegion]?.toUpperCase() ?? shownRegion.toUpperCase(),
-      view === "side" ? "PROFILE" : "FRONT",
+      m.def.view === "side" || hasSideOverlay(m.def.id) ? "PROFILE" : "FRONT",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -384,13 +381,8 @@ function showAt(next: number): void {
   if (view) {
     const spec = stageZoom(m, view);
     if (view !== shownStage) {
-      const stage = active.querySelector<HTMLElement>(".mdx-stage")!;
-      stage.classList.add("swap");
-      swapTimer = window.setTimeout(() => {
-        swapTimer = null;
-        // The guard that makes the cancel above belt-and-braces rather than
-        // load-bearing: a timer from a superseded render refuses to paint.
-        if (mine !== generation || !active) return;
+      stagePaint?.run(() => {
+        if (!active) return;
         paintStage(view);
         zoomEl.style.transition = "none";
         applyZoom(zoomEl, spec);
@@ -398,7 +390,6 @@ function showAt(next: number): void {
         // Reflow so the no-transition zoom lands before transitions resume.
         void zoomEl.offsetWidth;
         zoomEl.style.transition = "";
-        stage.classList.remove("swap");
       }, prefersReducedOverlayMotion() ? 0 : 150);
     } else {
       applyZoom(zoomEl, spec);
@@ -406,11 +397,9 @@ function showAt(next: number): void {
     }
   }
 
-  // Readout + tabs, re-entering with a small rise so the change reads.
+  // The camera carries the transition. Keep text immediately readable rather
+  // than forcing synchronous layout to restart every child's entrance.
   const info = active.querySelector<HTMLElement>(".mdx-info")!;
-  info.classList.remove("enter");
-  void info.offsetWidth;
-  info.classList.add("enter");
   info.querySelector(".mdx-value")!.textContent = fmt(m);
   const indicative = reliabilityOf(m.def.id) < RELIABLE_MIN;
   const unavailable = !!m.implausible || indicative;
@@ -469,6 +458,7 @@ export function openMetricDetail(o: MetricDetailOpts): void {
     </header>
     <div class="mdx-grid">
       <div class="mdx-stage">
+        <p class="mdx-unavailable" role="status" hidden></p>
         <div class="mdx-zoom">
           <canvas class="mdx-photo"></canvas>
           <canvas class="mdx-overlay-canvas"></canvas>
@@ -518,6 +508,7 @@ export function openMetricDetail(o: MetricDetailOpts): void {
 
   // Swipe between measurements — the stage is the natural surface for it.
   const stage = wrap.querySelector<HTMLElement>(".mdx-stage")!;
+  stagePaint = createStagePaint((hidden) => stage.classList.toggle("swap", hidden));
   let downX: number | null = null;
   stage.addEventListener("pointerdown", (e) => (downX = e.clientX));
   stage.addEventListener("pointerup", (e) => {

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { Quaternion, Vector3 } from "three";
 import { MAX_3D_STATES, mountMax3D } from "./max3d.js";
 
@@ -17,6 +18,22 @@ function values(accessorIndex: number): number[] {
   const width = { SCALAR: 1, VEC3: 3, VEC4: 4 }[accessor.type as "SCALAR" | "VEC3" | "VEC4"];
   return Array.from({ length: accessor.count * width }, (_, index) => binary.readFloatLE(binOffset + (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0) + index * 4));
 }
+
+/** Sample an authored key, rather than running the renderer or wall clock. */
+function transformAt(clipName: string, nodeName: string, path: string, fraction: number): number[] {
+  const clip = gltf.animations.find((clip: { name: string }) => clip.name === clipName);
+  const channel = clip.channels.find((channel: { target: { node: number; path: string } }) => gltf.nodes[channel.target.node].name === nodeName && channel.target.path === path);
+  assert.ok(channel, `${clipName}: ${nodeName}.${path} must be authored`);
+  const sampler = clip.samplers[channel.sampler];
+  const times = values(sampler.input), output = values(sampler.output), width = output.length / times.length;
+  const desired = times[times.length - 1] * fraction;
+  const index = times.length === 2 ? 0 : times.findIndex((time) => Math.abs(time - desired) < 0.00001);
+  assert.ok(index >= 0, `${clipName}: requested sample must be an authored key`);
+  return output.slice(index * width, (index + 1) * width);
+}
+
+const rotationAt = (clip: string, node: string, fraction: number): Quaternion => new Quaternion().fromArray(transformAt(clip, node, "rotation", fraction));
+const positionAt = (clip: string, node: string, fraction: number): Vector3 => new Vector3().fromArray(transformAt(clip, node, "translation", fraction));
 
 test("Max ships a real bounded GLB with no remote images, textures or paid-provider requirement", () => {
   assert.equal(binary.toString("ascii", 0, 4), "glTF");
@@ -154,6 +171,104 @@ test("mirror and guitar flipper endpoints meet their prop contacts through the h
   }
 });
 
+test("mirror is held ahead of Max, faces back toward him and receives a distinct one-eye wink", () => {
+  const face = gltf.nodes.find((node: { name: string }) => node.name === "MirrorFace");
+  for (const at of [0.25, 0.5, 0.75]) {
+    const rotation = rotationAt("mirror", "MirrorProp", at);
+    const grip = positionAt("mirror", "MirrorProp", at);
+    assert.ok(grip.z > 1.4, "mirror must be in front of the visor, not alongside the ear");
+    assert.ok(Math.abs(grip.x) < 1, "mirror stays close enough to look into");
+    const faceCenter = new Vector3().fromArray(face.translation).applyQuaternion(rotation).add(grip);
+    const reflectiveNormal = new Vector3(0, 0, 1).applyQuaternion(rotation);
+    assert.ok(reflectiveNormal.dot(faceCenter.clone().negate().normalize()) > 0.7,
+      "the reflective side, rather than its back, points toward Max");
+  }
+  assert.ok(transformAt("mirror", "LeftEye", "scale", 0.53125)[1] < 0.1, "the wink closes one eye");
+  assert.ok(transformAt("mirror", "RightEye", "scale", 0.53125)[1] > 0.9, "the other eye remains open");
+  for (const at of [0.375, 0.6875]) assert.ok(transformAt("mirror", "LeftEye", "scale", at)[1] > 0.9,
+    "the wink returns to an open eye rather than leaving Max squinting");
+});
+
+test("skateboard has a rounded raised-tail deck, two trucks and four wheels independent of Max's jump", () => {
+  const boardIndex = gltf.nodes.findIndex((node: { name: string }) => node.name === "SkateProp");
+  const parent = gltf.nodes.find((node: { children?: number[] }) => node.children?.includes(boardIndex));
+  assert.equal(parent.name, "MaxRoot", "board must not inherit the Body jump");
+  const children = gltf.nodes[boardIndex].children.map((index: number) => gltf.nodes[index]);
+  assert.equal(children.filter((node: { name: string }) => node.name.startsWith("SkateTruck")).length, 2);
+  const wheels = children.filter((node: { name: string }) => node.name.startsWith("SkateWheel"));
+  assert.equal(wheels.length, 4);
+  for (const axis of [0, 2]) {
+    assert.equal(wheels.filter((wheel: { translation: number[] }) => wheel.translation[axis] < 0).length, 2,
+      "wheels straddle both trucks and both sides");
+  }
+  const deck = children.find((node: { name: string }) => node.name === "SkateDeck");
+  const points = values(gltf.meshes[deck.mesh].primitives[0].attributes.POSITION);
+  const vertices = Array.from({ length: points.length / 3 }, (_, index) => new Vector3().fromArray(points, index * 3));
+  const length = Math.max(...vertices.map((p) => p.x)) - Math.min(...vertices.map((p) => p.x));
+  const width = Math.max(...vertices.map((p) => p.z)) - Math.min(...vertices.map((p) => p.z));
+  assert.ok(length > width * 2, "deck has a readable skateboard silhouette");
+  const centralTop = Math.max(...vertices.filter((p) => Math.abs(p.x) < length * 0.3).map((p) => p.y));
+  for (const direction of [-1, 1]) {
+    const end = vertices.filter((p) => p.x * direction > length * 0.45);
+    assert.ok(Math.max(...end.map((p) => p.y)) > centralTop + 0.06, "both kicktails curve upward");
+    assert.ok(Math.max(...end.map((p) => Math.abs(p.z))) < width * 0.4, "deck ends are rounded rather than square blocks");
+  }
+});
+
+test("skate first shows the board, drops it into place, then performs one airborne long-axis kickflip", () => {
+  for (const at of [0.1875, 0.25]) {
+    const position = positionAt("skate", "SkateProp", at);
+    assert.ok(position.z > 1.2 && position.y > -1, "the board is held visibly ahead of Max before riding");
+    const deckNormal = new Vector3(0, 1, 0).applyQuaternion(rotationAt("skate", "SkateProp", at));
+    assert.ok(Math.abs(deckNormal.z) > 0.7, "tilted reveal exposes the deck and wheels");
+    assert.ok(transformAt("skate", "SkateProp", "scale", at).every((value) => value > 0.99));
+  }
+  const restingBoard = positionAt("skate", "SkateProp", 0.40625);
+  assert.ok(restingBoard.y < -1.5 && restingBoard.z < 0.3, "board drops below Max before the trick");
+  assert.ok(rotationAt("skate", "SkateProp", 0.40625).angleTo(new Quaternion()) < 0.00001);
+  const angles: number[] = [];
+  for (let key = 29; key <= 46; key++) {
+    const rotation = rotationAt("skate", "SkateProp", key / 64);
+    assert.ok(Math.abs(rotation.y) < 0.00001 && Math.abs(rotation.z) < 0.00001,
+      "kickflip rotates about the long deck axis, not an end-over-end somersault");
+    angles.push(2 * Math.atan2(rotation.x, rotation.w));
+  }
+  assert.ok(Math.abs(angles[0]) < 0.00001 && Math.abs(angles[angles.length - 1] - Math.PI * 2) < 0.00001,
+    "the board completes a full 360-degree flip and lands upright");
+  assert.ok(angles.every((angle, index) => index === 0 || angle >= angles[index - 1]), "one continuous forward flip");
+  const peak = 0.578125;
+  const bodyRise = positionAt("skate", "Body", peak).y;
+  const boardRise = positionAt("skate", "SkateProp", peak).y - restingBoard.y;
+  assert.ok(bodyRise > boardRise + 0.1, "Max jumps clear of the flipping board");
+  assert.ok(Math.abs(positionAt("skate", "SkateProp", 0.8125).y - restingBoard.y) < 0.00001,
+    "board lands at its riding height");
+});
+
+test("approved speaking and the other nine untouched clips retain their exact authored motion", () => {
+  // Canonical numeric channel hashes from the pre-polish asset. Ignore binary
+  // offsets and node ordering, which legitimately change when props are rebuilt.
+  const approved: Record<string, string> = {
+    idle: "07cf4509fa1697124e17235ae30eb20f3d74a32a07bfc22e35a7cf2d2d121f11",
+    listening: "7059b480fb6ed09a10cf37ff97306c1d369d3dc6546864f011efd4ab5d88b5c5",
+    thinking: "969edd002fb0b1f2f4019be918af4571065d02cd639a4edfcddfc10776e24aa3",
+    speaking: "189aaaf4f95044daa1ccb116029ac9805fec030193b36d96419eafe5f5419058",
+    celebrate: "5db9500b3573149ef71ca59210cac855d2ffdaa158d8b195e3729e528819ada5",
+    quiet: "27c88783644b0e49b9652e3c1179b30bc5df966406b920b5484b096885701235",
+    wave: "ad6aa3943dfb336892f3ec8eb19cd254b2da47b77a454663a854544fbc1b1350",
+    shocked: "91b1653a5b0e3453838fa82f5d061aa57300a5b2584020f474b9df7ca3b494d2",
+    angry: "7915902f8e3bf7640d219e351d8bb064db00e5c76289f870ebd2c494a8e412df",
+    guitar: "a93a5223287ea8697398396946776aecac3becb52c051cc50e99ceb0e1dd7238",
+  };
+  for (const [name, expected] of Object.entries(approved)) {
+    const clip = gltf.animations.find((clip: { name: string }) => clip.name === name);
+    const canonical = clip.channels.map((channel: { sampler: number; target: { node: number; path: string } }) => {
+      const sampler = clip.samplers[channel.sampler];
+      return { name: gltf.nodes[channel.target.node].name, path: channel.target.path, time: values(sampler.input), value: values(sampler.output) };
+    }).sort((a: { name: string; path: string }, b: { name: string; path: string }) => `${a.name}.${a.path}`.localeCompare(`${b.name}.${b.path}`));
+    assert.equal(createHash("sha256").update(JSON.stringify(canonical)).digest("hex"), expected, `${name} must keep its approved motion`);
+  }
+});
+
 test("the opt-in launcher defers renderer and asset work and disposes replaced surfaces", () => {
   const source = read("./max3d.ts");
   assert.ok(!/^import .*from ["']three/m.test(source));
@@ -168,6 +283,7 @@ test("the opt-in launcher defers renderer and asset work and disposes replaced s
 
 test("runtime owns bounded rendering, clip blending and full GPU/fallback cleanup", () => {
   const source = read("./max3dRuntime.ts");
+  assert.match(source, /max-rig-v1\.glb\?v=\$\{maxAsset\.version\}/, "new character revisions cannot reuse a stale force-cached asset");
   for (const required of ["1000 / 30", "640 / Math.max", "1.5", "createMax3DPlayback", "webglcontextlost", "renderer.dispose()", "renderer.forceContextLoss()", "geometry.dispose()", "material.dispose()", "mixer.uncacheRoot", "setMax3DActive(fallback, true)"]) assert.ok(source.includes(required), required);
   assert.match(source, /if \(dead \|\| paused \|\| signal\.aborted \|\| !stage\.isConnected\) return/);
   assert.match(source, /schedule\.state\(\) !== "quiet" \|\| playback\.transitioning\(\)/);

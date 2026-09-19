@@ -56,7 +56,7 @@ test("the route speaks the client's contract: same gate order, claim before rend
   // The contract's paths and states.
   assert.match(contract, /POST \/api\/morph-preview/);
   assert.match(contract, /GET \/api\/morph-preview\?job=<id>/);
-  assert.match(route, /searchParams\.get\("job"\)/);
+  assert.match(route, /params\.get\("job"\)/);
   assert.match(route, /status: "processing", jobId/);
 });
 

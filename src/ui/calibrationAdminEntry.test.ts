@@ -19,11 +19,42 @@ test("calibration is a League owner-admin tool, not a creator upgrade or public 
 });
 
 test("account switching clears the resolved grant before leaving the tool", () => {
+  assert.match(quick, /const transition = quickOwnerScopeTransition\(previousOwner, owner\)/);
+  assert.match(quick, /quickOwnerId = transition\.userId/);
+  assert.doesNotMatch(quick, /quickOwnerId = owner;/);
   const changed = quick.slice(quick.indexOf("if (changed) {"), quick.indexOf("location.reload()"));
   assert.ok(changed.indexOf("quickAccess = null") < changed.indexOf("leaveMode()"));
+});
+
+test("calibration records explicit anonymous reference IDs separately from private labels", () => {
+  const form = quick.slice(quick.indexOf("function renderRatingStep("), quick.indexOf("function renderVerdictStep("));
+  assert.match(form, /id="q-cal-reference"/);
+  assert.match(form, /referenceId = calibrationReferenceId\(reference\.value\)/);
+  assert.match(form, /\{\s*referenceId,\s*thumb:/);
+  assert.doesNotMatch(form, /calibrationReferenceId\(label\.value\)/);
 });
 
 test("League uses staff access independently of a pending creator application", () => {
   assert.match(league, /const entry = leagueEntry\(staff, row\?\.status \?\? null\)/);
   assert.match(league, /if \(entry === "staff"\)[\s\S]*?synthetic_staff: true/);
+});
+
+test("front calibration carries the upload fingerprint through the pending capture and clears it on reset", () => {
+  assert.match(quick, /await run\(c, generation, f\)/);
+  assert.match(quick, /if \(mode === "calibrate"\) \{\s*try \{\s*imageSource = await fingerprintCalibrationImage\(src, \{ originalFile: sourceFile \}\)/);
+  assert.match(quick, /pendingFrontImageSource = last\?\.imageSource/);
+  assert.match(quick, /imageSource: pendingFrontImageSource/);
+  const reset = quick.slice(quick.indexOf("function clearPending("), quick.indexOf("function renderFaceSlots("));
+  assert.match(reset, /pendingFrontImageSource = undefined/);
+  assert.match(quick, /imageSource: review\.imageSource/);
+});
+
+test("saved-set display and both exports fail visibly on unreadable storage", () => {
+  const view = quick.slice(quick.indexOf("function renderCalibrationSet("), quick.indexOf("const wait ="));
+  assert.equal([...view.matchAll(/loadCalibrationSetForExport\(\)/g)].length, 3);
+  assert.doesNotMatch(view, /loadCalibrationSet\(\)/);
+  assert.match(view, /Saved set unavailable/);
+  assert.match(view, /Do not clear your browser data/);
+  assert.match(view, /The diagnostics could not be exported/);
+  assert.match(view, /The corpus could not be read/);
 });

@@ -38,21 +38,21 @@ test("body composition earns a testable follow-up, not a target-weight prompt", 
   assert.ok(!chips.some((chip) => /how lean|target weight|body fat percentage/i.test(chip)));
 });
 
-test("the weakest region and the strongest are both offered", () => {
+test("summary scores do not volunteer criticism of the weakest region", () => {
   const chips = suggestFollowUps(CONTEXT, "Short answer: not much.", []);
   const joined = chips.join(" | ");
-  assert.ok(/jaw/i.test(joined), joined);
+  assert.doesNotMatch(joined, /jaw|low|score the most/i);
 });
 
 test("a question already asked is never suggested back", () => {
-  const asked = ["What would move my score the most?"];
+  const asked = ["What should I focus on first?"];
   const chips = suggestFollowUps(CONTEXT, "Short answer.", asked);
-  assert.ok(!chips.includes("What would move my score the most?"));
+  assert.ok(!chips.includes("What should I focus on first?"));
 });
 
 test("matching is case- and space-insensitive, because the chip was typed into the box", () => {
-  const chips = suggestFollowUps(CONTEXT, "Short.", ["  what would move my score the most?  "]);
-  assert.ok(!chips.includes("What would move my score the most?"));
+  const chips = suggestFollowUps(CONTEXT, "Short.", ["  what should i focus on first?  "]);
+  assert.ok(!chips.includes("What should I focus on first?"));
 });
 
 test("no scan still produces something to tap", () => {
@@ -69,4 +69,16 @@ test("never more than three, and never a duplicate", () => {
 
 test("the openers are short enough to sit on one line of a phone", () => {
   for (const s of OPENING_SUGGESTIONS) assert.ok(s.length <= 34, s);
+});
+
+test("goal and active routine outrank unsolicited score optimisation", () => {
+  const context = { ...CONTEXT, coaching: { goals: ["Skin quality"], endGoal: "Simple routine", quietRegions: ["jaw"], excludedAdvice: [], dietaryExclusions: [], skinConcerns: [], routines: [{ id: "test", title: "Sleep", status: "running" as const, startedAt: 1, weeksToReview: 4, tickDays: [], checkIns: [] }] } };
+  const chips = suggestFollowUps(context, "Keep the routine manageable.", []);
+  assert.match(chips[0], /current routine/);
+  assert.match(chips[1], /goal I chose/);
+  assert.doesNotMatch(chips.join(" "), /jaw|weak|low|score/);
+});
+
+test("a crisis response has no appearance optimisation chips", () => {
+  assert.deepEqual(suggestFollowUps(CONTEXT, "If you might hurt yourself, contact emergency services.", []), []);
 });

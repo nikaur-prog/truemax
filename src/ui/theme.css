@@ -1,0 +1,87 @@
+/* Real surface/text tokens, never a colour-inversion filter over photographs. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #131716;
+  --card: #1d2321;
+  --panel: #1d2321;
+  --ink: #f1f2ed;
+  --mut: #a8b3ae;
+  --line: #39443e;
+  --soft: #252e29;
+  --acc: #79d6bc;
+  --acc-soft: #203c33;
+  --warm: #eeab92;
+  --up: #8dd1a0;
+  --down: #eeab92;
+}
+
+.set-theme-choices {
+  display: flex;
+  gap: 6px;
+  width: min(300px, 100%);
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--soft);
+}
+.set-theme-choices button {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--mut);
+  font: 600 14px/1.4 var(--sans);
+  cursor: pointer;
+}
+.set-theme-choices button[aria-pressed="true"] {
+  border-color: var(--line);
+  background: var(--card);
+  color: var(--ink);
+}
+.set-theme-choices button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+/* A few legacy surfaces predate the shared palette. Keep photographs, scan
+   canvases and deliberately dark media previews in their original colours. */
+html[data-theme="dark"] :is(.trial-input, .trial-choice, .offer-ceiling,
+  .plan-card:not(.featured), .set-feedback-item, .set-consent-state, .goal-consent-facts,
+  .acct-field input, .acct-field select, .acct-field textarea, .purchase-notice,
+  .maxtab-max, .maxchat-max, .maxtab-history, .maxtab-tracker, .askmax-bubble,
+  .paste-hint kbd) {
+  background: var(--card);
+  color: var(--ink);
+}
+html[data-theme="dark"] :is(.trial-input:focus, .acct-field input:focus) { background: var(--soft); }
+html[data-theme="dark"] :is(.typebox, .imp p, .mac-note, .nutri-note, .nutri-why,
+  .nutri-card p, .mdx-tabbody, .delta-read.worthNoting) { color: var(--ink); }
+html[data-theme="dark"] :is(.btn.pri, .rtab.sel, .ract-lead, .dash-bar-scan,
+  .acct-oauth.apple, .acct-signup-trigger, .acct-disc, .maxtab-you, .maxchat-you,
+  .maxtab-composer button, .maxchat-composer button, .fedit-chip.on),
+html[data-theme="dark"] .plan-card:not(.featured) .plan-cta {
+  background: var(--ink);
+  color: var(--bg);
+}
+html[data-theme="dark"] .cam-actions .btn.pri { background: #edf4ef; color: #13211b; }
+html[data-theme="dark"] .cam-actions .btn.pri .btn-ic { color: #176a53; filter: none; }
+html[data-theme="dark"] :is(.btn.positive, .btn.side-confirm, .side-review-actions .side-confirm,
+  .acct-submit.ready, .maxchat-action button) { color: #10251c; }
+html[data-theme="dark"] .trial-shell {
+  border-color: var(--line);
+  box-shadow: 0 38px 120px rgba(0,0,0,.38);
+}
+html[data-theme="dark"] .askmax-bubble::after { border-top-color: var(--card); }
+/* This one speech bubble intentionally stays white on a dark illustrated card. */
+html[data-theme="dark"] .max-say p { color: #141518; }
+html[data-theme="dark"] .max-say b { color: #0e7a68; }
+html[data-theme="dark"] .tag { color: var(--mut); }
+html[data-theme="dark"] .btn.gho { color: var(--ink); }
+html[data-theme="dark"] .btn.cancel:hover { background: #3a2c26; }
+html[data-theme="dark"] .delta-chip.up { background: #203b2b; }
+html[data-theme="dark"] .delta-chip.down { background: #3d2c26; }
+html[data-theme="dark"] .rangebar i { border-color: #17221d; }
+html[data-theme="dark"] .mdx-flag:not(.soft) { color: var(--warm); background: #3d2c26; }
+html[data-theme="dark"] :is(.tone-hi, .mdx-score.tone-hi, .dash-hero-delta.up,
+  .dash-scan-chip.up, .hist-chip.up) { color: var(--up); }

@@ -176,7 +176,7 @@ export const RECS: Rec[] = [
       category: "A broad-spectrum face sunscreen",
       strength: "SPF 30 or higher, with UVA protection stated on the label",
       example:
-        "Supermarket and pharmacy own-brands pass the same tests as the expensive ones. Buy the texture you will actually wear every day, because the one you skip protects nothing.",
+        "For example, La Roche-Posay Anthelios Invisible Fluid Facial Sunscreen SPF 50+. Supermarket and pharmacy own-brand options can also meet the label requirements. Choose a texture you will actually wear.",
       where: "Supermarket or pharmacy. The cheapest thing on this list.",
     },
   },
@@ -245,7 +245,7 @@ export const RECS: Rec[] = [
       strength: "2%, and leave-on rather than a face wash",
       example:
         "Sold as a BHA liquid or a blemish exfoliant. Paula's Choice 2% BHA is the long-standing one; CeraVe and The Ordinary sell cheaper 2% versions.",
-      where: "Pharmacy or the skincare aisle. A wash rinses off before it works, so check it says leave-on.",
+      where: "Pharmacy or the skincare aisle. This example is a leave-on product. Salicylic acid cleansers are another formulation; follow the directions for the product you choose.",
     },
   },
   {
@@ -264,11 +264,11 @@ export const RECS: Rec[] = [
     otc: true,
     caution: "It can irritate skin and bleach towels, bedding and clothing. Stop and seek help for swelling or blistering.",
     buy: {
-      category: "A benzoyl peroxide gel or wash",
-      strength: "2.5%, not the 5% or 10% next to it on the shelf",
+      category: "A lower-strength benzoyl peroxide gel",
+      strength: "2.5% benzoyl peroxide; ask a pharmacist whether the formulation suits you",
       example:
-        "Sold as PanOxyl 2.5% wash, and as pharmacy own-brand acne gel. The higher strengths beside it irritate more without working better.",
-      where: "Pharmacy or supermarket. Over the counter everywhere.",
+        "For example, Benzac AC Mild Strength 2.5% Acne Gel in Australia. Washes and gels can have different strengths and directions, so do not treat them as interchangeable.",
+      where: "A pharmacy. Availability and labels differ by country; check locally and follow the product directions.",
     },
   },
   {
@@ -285,10 +285,10 @@ export const RECS: Rec[] = [
       "Modest but real effects on redness and barrier function. Not a headline act, but it pairs well with the actives above rather than replacing them.",
     otc: true,
     buy: {
-      category: "A niacinamide serum",
-      strength: "4 to 5%. Higher is not better and stings more",
+      category: "A niacinamide serum or moisturiser",
+      strength: "4 to 5% niacinamide, where the percentage is stated on the label",
       example:
-        "Most ranges sell one. The Ordinary's is 10%, which is above where the evidence sits, so it is worth reading the percentage rather than the front of the bottle.",
+        "For example, The INKEY List Omega Water Cream is a moisturiser with 5% niacinamide. Check what your current moisturiser contains before adding a separate serum.",
       where: "Pharmacy or the skincare aisle.",
     },
   },

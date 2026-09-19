@@ -4,6 +4,11 @@ import type { VerdictTone } from "./analysisMode.js";
 import { ordinal } from "./ordinal.js";
 import { directionFor } from "./metrics.js";
 import { RELIABLE_MIN, reliabilityOf } from "./reliability.js";
+import { GOALS } from "./goals.js";
+import type { Profile } from "./goals.js";
+import type { Protocol } from "./protocol.js";
+import { sanitiseCoachingSnapshot } from "./coachingSnapshot.js";
+import type { CoachingSnapshot } from "./coachingSnapshot.js";
 
 // ---------------------------------------------------------------------------
 // What Max is allowed to know.
@@ -38,6 +43,22 @@ export interface MaxChatContext {
   activePlan?: string[];
   scans: number;
   movement?: string;
+  coaching?: CoachingSnapshot;
+}
+
+export function buildCoachingSnapshot(profile: Profile, protocols: readonly Protocol[]): CoachingSnapshot {
+  return sanitiseCoachingSnapshot({
+    goals: profile.goals.map((id) => GOALS.find((goal) => goal.id === id)?.label).filter(Boolean),
+    endGoal: profile.endGoal, quietRegions: profile.quiet,
+    excludedAdvice: Object.entries(profile.advice).filter(([, allowed]) => !allowed).map(([channel]) => channel),
+    dietaryExclusions: profile.diet, skinConcerns: profile.skin,
+    routines: protocols.map((protocol) => ({
+      id: protocol.id, title: protocol.title, status: protocol.status, startedAt: protocol.startedAt,
+      weeksToReview: protocol.weeksToJudge, tickDays: protocol.ticks ?? [], checkIns: protocol.checkIns,
+      restore: { recId: protocol.recId, offeredAt: protocol.offeredAt, startBy: protocol.startBy,
+        metricId: protocol.metricId, start: protocol.start ?? "acquire" },
+    })),
+  })!;
 }
 
 // How many of each end of the table travel. Six and three: the weak end is what

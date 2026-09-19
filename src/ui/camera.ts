@@ -4,6 +4,7 @@ import { detectOcclusion } from "../engine/occlusion.js";
 import type { FrameCheck, Viewport } from "../engine/captureGuide.js";
 import { createPreviewCadence, createPreviewLoop } from "./previewLoop.js";
 import type { PreviewLoop } from "./previewLoop.js";
+import { isAppForeground, subscribeNativeActivity } from "../engine/nativeBridge.js";
 
 // Live camera capture. The preview starts on the landing screen so the first
 // thing someone sees is their own face already being tracked — the guidance is
@@ -86,6 +87,9 @@ export async function startCamera(
   let deviceId: string | null = null;
   let live = true;
   let attachAttempt = 0;
+  let attaching = 0;
+  let pauseVersion = 0;
+  const foregroundWaiters = new Set<() => void>();
   let previewLoop: PreviewLoop | null = null;
   const cadence = createPreviewCadence();
   let lastFrameAt = performance.now();
@@ -124,49 +128,90 @@ export async function startCamera(
     return ownedPreview;
   };
 
+  const waitForForeground = (): Promise<void> => {
+    if (!live) return Promise.reject(cancelled());
+    if (isAppForeground()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const wake = () => {
+        if (live && !isAppForeground()) return;
+        foregroundWaiters.delete(wake);
+        if (live) resolve(); else reject(cancelled());
+      };
+      foregroundWaiters.add(wake);
+    });
+  };
+
   async function attach(): Promise<void> {
-    if (!live) throw cancelled();
-    opts.onPause?.();
-    if (!live) throw cancelled();
-    const attempt = ++attachAttempt;
-    // Stop the old tracks BEFORE asking for new ones: many phones refuse to
-    // hold two cameras open, and the refusal arrives as a cryptic NotReadable.
-    releaseStream();
-    const nextStream = await navigator.mediaDevices.getUserMedia(constraints());
-    // getUserMedia cannot be aborted. A cancel, a newer swap, or a recovery
-    // can therefore win while this permission/device request is in flight.
-    // Never let the late result resurrect a preview its owner already closed.
-    if (!live || attempt !== attachAttempt) {
-      nextStream.getTracks().forEach((t) => t.stop());
-      throw new Error("Camera request was superseded");
-    }
-    stream = nextStream;
-    opts.video.srcObject = nextStream;
-    opts.video.muted = true;
-    opts.video.playsInline = true;
+    attaching++;
     try {
-      await opts.video.play();
-    } catch (error) {
-      nextStream.getTracks().forEach((t) => t.stop());
-      if (stream === nextStream) stream = null;
-      if (opts.video.srcObject === nextStream) opts.video.srcObject = null;
-      throw error;
+      while (live) {
+        // Native App activity may change while the document still says visible.
+        // Keep one attachment owner across pause/resume, including startup.
+        if (!isAppForeground()) await waitForForeground();
+        if (!live) throw cancelled();
+        opts.onPause?.();
+        if (!live) throw cancelled();
+        const attempt = ++attachAttempt;
+        const startedBeforePause = pauseVersion;
+        // Stop the old tracks BEFORE asking for new ones: many phones refuse to
+        // hold two cameras open, and the refusal arrives as a cryptic NotReadable.
+        releaseStream();
+        let nextStream: MediaStream;
+        try {
+          nextStream = await navigator.mediaDevices.getUserMedia(constraints());
+        } catch (error) {
+          if (live && attempt === attachAttempt && pauseVersion !== startedBeforePause) continue;
+          throw error;
+        }
+        // getUserMedia cannot be aborted. A cancel, a newer swap, or a recovery
+        // can therefore win while this permission/device request is in flight.
+        // Never let the late result resurrect a preview its owner already closed.
+        if (!live || attempt !== attachAttempt) {
+          nextStream.getTracks().forEach((t) => t.stop());
+          throw new Error("Camera request was superseded");
+        }
+        if (!isAppForeground()) {
+          nextStream.getTracks().forEach((t) => t.stop());
+          continue;
+        }
+        stream = nextStream;
+        opts.video.srcObject = nextStream;
+        opts.video.muted = true;
+        opts.video.playsInline = true;
+        try {
+          await opts.video.play();
+        } catch (error) {
+          nextStream.getTracks().forEach((t) => t.stop());
+          if (stream === nextStream) stream = null;
+          if (opts.video.srcObject === nextStream) opts.video.srcObject = null;
+          if (live && attempt === attachAttempt && pauseVersion !== startedBeforePause) continue;
+          throw error;
+        }
+        if (!live || attempt !== attachAttempt) {
+          nextStream.getTracks().forEach((t) => t.stop());
+          if (stream === nextStream) stream = null;
+          if (opts.video.srcObject === nextStream) opts.video.srcObject = null;
+          throw new Error("Camera request was superseded");
+        }
+        if (!isAppForeground()) {
+          releaseStream();
+          continue;
+        }
+        if (reacquireTimer !== null) clearTimeout(reacquireTimer);
+        reacquireTimer = null;
+        const track = stream.getVideoTracks()[0];
+        // Believe the track over the request — a phone with no back camera hands
+        // back the front one whatever was asked for.
+        const f = track?.getSettings?.().facingMode;
+        if (f === "environment" || f === "user") facing = f;
+        applyMirror();
+        track?.addEventListener("ended", onTrackDown);
+        return;
+      }
+      throw cancelled();
+    } finally {
+      attaching--;
     }
-    if (!live || attempt !== attachAttempt) {
-      nextStream.getTracks().forEach((t) => t.stop());
-      if (stream === nextStream) stream = null;
-      if (opts.video.srcObject === nextStream) opts.video.srcObject = null;
-      throw new Error("Camera request was superseded");
-    }
-    if (reacquireTimer !== null) clearTimeout(reacquireTimer);
-    reacquireTimer = null;
-    const track = stream.getVideoTracks()[0];
-    // Believe the track over the request — a phone with no back camera hands
-    // back the front one whatever was asked for.
-    const f = track?.getSettings?.().facingMode;
-    if (f === "environment" || f === "user") facing = f;
-    applyMirror();
-    track?.addEventListener("ended", onTrackDown);
   }
 
   // ---- stream recovery ------------------------------------------------------
@@ -185,7 +230,7 @@ export async function startCamera(
     opts.onLost?.();
   };
   const scheduleReacquire = () => {
-    if (!live || document.visibilityState !== "visible" || reacquireTimer !== null) return;
+    if (!live || !isAppForeground() || reacquireTimer !== null) return;
     if (reacquireRetries >= 3) {
       reportLost();
       return;
@@ -197,7 +242,7 @@ export async function startCamera(
     }, delay);
   };
   async function reacquire(): Promise<void> {
-    if (!live || reacquiring) return;
+    if (!live || !isAppForeground() || reacquiring) return;
     reacquiring = true;
     try {
       await attach();
@@ -218,27 +263,33 @@ export async function startCamera(
     opts.onPause?.();
     // Recover into a visible tab immediately; a hidden one would just lose
     // the fresh track the same way, so it reacquires on return instead.
-    if (document.visibilityState === "visible") {
+    if (isAppForeground()) {
       reacquireRetries = 0;
       void reacquire();
     }
   }
   const onVisible = () => {
     if (!live) return;
-    if (document.visibilityState !== "visible") {
+    if (!isAppForeground()) {
+      pauseVersion++;
       previewLoop?.pause();
+      if (reacquireTimer !== null) clearTimeout(reacquireTimer);
+      reacquireTimer = null;
       opts.onPause?.();
       return;
     }
     lastFrameAt = performance.now();
     cadence.reset();
     previewLoop?.resume();
+    for (const wake of foregroundWaiters) wake();
+    if (attaching) return;
     const track = stream?.getVideoTracks()[0];
     if (!track || track.readyState !== "live" || track.muted) {
       reacquireRetries = 0;
       void reacquire();
     }
   };
+  const unsubscribeNative = subscribeNativeActivity(onVisible);
 
   let rejectStartup: ((error: Error) => void) | null = null;
   const startupCancelled = new Promise<never>((_resolve, reject) => { rejectStartup = reject; });
@@ -250,11 +301,13 @@ export async function startCamera(
     const wasLive = live;
     live = false;
     attachAttempt++;
+    for (const wake of foregroundWaiters) wake();
     previewLoop?.pause();
     if (notifyPause && wasLive) opts.onPause?.();
     if (reacquireTimer !== null) clearTimeout(reacquireTimer);
     reacquireTimer = null;
     document.removeEventListener("visibilitychange", onVisible);
+    unsubscribeNative();
     opts.signal?.removeEventListener("abort", onAbort);
     if (releaseStream()) {
       opts.video.classList.remove("unmirrored");
@@ -327,7 +380,7 @@ export async function startCamera(
 
   const loop = (now: number) => {
     if (!live) return;
-    if (document.visibilityState !== "visible") {
+    if (!isAppForeground()) {
       previewLoop?.pause();
       opts.onPause?.();
       return;
@@ -376,7 +429,7 @@ export async function startCamera(
     if (
       live &&
       !reacquiring &&
-      document.visibilityState === "visible" &&
+      isAppForeground() &&
       now - lastFrameAt > STALL_MS
     ) {
       // Reset the clock before the attempt so a slow reacquire does not
@@ -387,12 +440,12 @@ export async function startCamera(
   };
 
   previewLoop = createPreviewLoop(loop);
-  if (document.visibilityState === "visible") previewLoop.resume();
+  if (isAppForeground()) previewLoop.resume();
 
   return {
     stop,
     capture() {
-      if (!live || !stream || opts.video.srcObject !== stream) return null;
+      if (!live || !isAppForeground() || !stream || opts.video.srcObject !== stream) return null;
       const v = opts.video;
       if (!v.videoWidth) return null;
       const c = document.createElement("canvas");
@@ -411,7 +464,7 @@ export async function startCamera(
       return c;
     },
     async swap() {
-      if (!live) return false;
+      if (!live || !isAppForeground() || attaching) return false;
       const wasFacing = facing;
       const wasDevice = deviceId;
       try {

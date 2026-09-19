@@ -1,5 +1,22 @@
 # TrueMax Master Build Plan
 
+## Current publication instructions: 19 September 2026
+
+See [Calibration preparation release](RELEASE_CALIBRATION_2026-09-19.md). The owner now requests merge and production availability before beginning their calibration set. The following handoff is historical; its publication order and verification totals are superseded. Its unfinished accuracy, cloud-history and live-quality work remains outstanding.
+
+## Historical handoff status: 11 September 2026
+
+Read [Claude handoff](CLAUDE_HANDOFF_2026-09-11.md) for the current implementation inventory and next actions. The roadmap below is preserved as historical planning; earlier completion labels do not mean the whole roadmap or current calibration programme is complete.
+
+- Working state: dirty local branch `codex/post-267-audit`, HEAD `60158b0`. Current work is unmerged.
+- Last completed local verification: **2048 tests passed, 0 failed, 28 skipped, 1 todo**. `npx tsc --noEmit`, `npm run build`, and `node scripts/emdash.mjs` passed in the previous run; these checks have not been rerun for this documentation update.
+- Calibration: an admin-authenticated preview must be verified before real calibration. Matched FaceIQ evidence and manually reviewed landmark corrections remain pending; no new accuracy claim is established.
+- Release checks still pending: live Max evaluation and real-device iOS profiling.
+- Keep the default-off `VITE_MORPH_PREVIEW` frontend gate off. Deployed state is unverified and the server lacks a matching kill switch. Atomic idempotency is required before rollout.
+- Full cloud routine-history storage/synchronization schema is not built. The private backup/import and recent-only cloud continuity work must not be described as full automatic cloud history.
+
+---
+
 Status: implementation blueprint; Stage 1 exit gate passed 20 August 2026
 
 Scope: scanner, scoring, results, Max, accounts, billing, personalized journey, creator tools, launch, and later native apps.

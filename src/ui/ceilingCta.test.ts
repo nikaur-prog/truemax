@@ -35,3 +35,10 @@ test("the block claims no rarity the reference set cannot carry", () => {
 test("no em dash in the ceiling copy", () => {
   assert.doesNotMatch(ceilingCtaMarkup({ overall: 5.6, potential: 7.1, photo: null }), /—/);
 });
+
+test("the score scenario is not presented as an achievable personal forecast", () => {
+  const html = ceilingCtaMarkup({ overall: 5.6, potential: 7.1, photo: null });
+  assert.match(html, /modelled scenario/);
+  assert.match(html, /not a personal ceiling or a promise/);
+  assert.doesNotMatch(html, /Every point of that gap is a metric that moves/);
+});

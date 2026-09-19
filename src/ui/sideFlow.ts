@@ -58,6 +58,8 @@ import type { ScanPerformanceAttempt } from "../engine/scanPerformance.js";
 import { flipSideReviewPoints, recoverSideSeed, sideImageSize } from "../engine/sideCaptureRecovery.js";
 import type { SideCaptureDiagnostics, SideReviewMode } from "../engine/sideCaptureRecovery.js";
 import { runSideCloudAttempt } from "../engine/sideCloudAttempt.js";
+import { fingerprintCalibrationImage } from "../engine/calibrationImageSource.js";
+import type { CalibrationImageSource } from "../engine/calibrationImageSource.js";
 
 // The upload glyph: a cloud with an arrow going up into it.
 //
@@ -125,6 +127,8 @@ export interface SidePlacementReview {
   seedVersion?: string;
   /** Local calibration evidence, including failed automatic placement. */
   diagnostics?: SideCaptureDiagnostics;
+  /** Calibration-only match to the exact source file and displayed review raster. */
+  imageSource?: CalibrationImageSource;
   feedback: SideFeedbackIntent | null;
   /**
    * Whether a human stood behind these thirteen points.
@@ -169,6 +173,7 @@ interface SidePlacementSeed {
   confidenceByPoint?: Partial<Record<SidePointId, number>>;
   seedVersion?: string;
   diagnostics?: SideCaptureDiagnostics;
+  imageSource?: CalibrationImageSource;
 }
 
 let verifier: VerifyHandle | null = null;
@@ -805,7 +810,7 @@ async function load(file: File, ctx: SideCtx): Promise<void> {
   c.width = size.width;
   c.height = size.height;
   c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-  await loadCanvas(c, ctx, signal);
+  await loadCanvas(c, ctx, signal, file);
   } catch {
     if (sideAttempt.current(signal)) showSideLoadFailure(ctx);
   }
@@ -834,7 +839,7 @@ function showSidePlacementFailure(ctx: SideCtx): void {
 // Both entry points — a chosen file and a captured frame — converge here, so
 // the verify step cannot behave differently depending on where the pixels came
 // from.
-async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAttempt.begin()): Promise<void> {
+async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAttempt.begin(), originalFile?: Blob): Promise<void> {
   const e = el();
   let photoPrepared = false;
   try {
@@ -886,6 +891,10 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   appendSideExitActions(e.actions, ctx);
   // Yield for the loading controls. There is no artificial minimum wait.
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  if (!sideAttempt.current(signal)) return;
+  const imageSource = ctx.reviewMode === "calibration"
+    ? await fingerprintCalibrationImage(snapshot, { originalFile, signal })
+    : undefined;
   if (!sideAttempt.current(signal)) return;
 
   // Canonicalise the facing. A profile photograph mirrored horizontally has
@@ -957,6 +966,7 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
     confidenceByPoint,
     seedVersion: cloudResult?.seedVersion ?? (recovered.diagnostics?.templateFallback ? "manual-template-fallback-v1" : undefined),
     diagnostics: recovered.diagnostics,
+    imageSource,
   });
   stopThinking();
   e.frame.classList.remove("scanning");
@@ -1747,6 +1757,7 @@ function mountVerify(
         seedMethod,
         seedVersion,
         diagnostics: diagnostics ? structuredClone(diagnostics) : undefined,
+        imageSource: seed.imageSource ? { ...seed.imageSource } : undefined,
         feedback,
         photo: reviewed,
         // Anything that reaches here through the review screen has been

@@ -1,5 +1,15 @@
 # Image-first UGC asset workflow
 
+For all future video-reference assessments, use the
+[repeatability and conversion rubric](CONTENT_TRANSCRIPT_EVALUATION_2026-09-19.md).
+Its UGC-plus-product-motion pilot is an additional template lane, not evidence
+that these generation workflows are finished or that any format guarantees reach.
+
+> Status, 11 September 2026: Retain this as the content-workstream plan. The latest pre-calibration batch does not establish completed image/video generation or beat-aligned delivery. See the
+> [current continuation handoff](CLAUDE_HANDOFF_2026-09-11.md) for branch preservation,
+> verification evidence and the next execution order. Historical details below
+> do not imply that the whole roadmap has shipped.
+
 Plan only, 9 September 2026. No generation, training, photo upload, purchase or publishing was performed for this plan. This is a synthetic illustration lane, separate from the real front-scan carousel in `CAROUSEL_RUNDOWN_PLAN.md` and from the app's personal goal preview.
 
 ## The deliverable

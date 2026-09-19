@@ -1,6 +1,7 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { LM } from "../engine/geometry.js";
 import type { ScoredMetric } from "../engine/types.js";
+import { startMeasurementInteraction } from "../engine/measurementPerformance.js";
 
 // ---------------------------------------------------------------------------
 // Measurement overlays: draw the actual measurement on the face.
@@ -732,8 +733,11 @@ export function animateMeasurement(
   height: number,
   metric: ScoredMetric,
 ): OverlayFade {
+  const interaction = startMeasurementInteraction("front");
   if (prefersReducedOverlayMotion()) {
     drawMeasurement(canvas, landmarks, width, height, metric);
+    interaction.drawn();
+    interaction.finish("completed");
     return { cancel() {} };
   }
   // Whatever is on the canvas RIGHT NOW — the previous measurement, or the
@@ -747,16 +751,25 @@ export function animateMeasurement(
   // is shown anywhere it was not measured.
   const from = snapshotIfMatching(canvas, width, height);
   let raf = 0;
-  let start = 0;
+  const start = performance.now();
+  let cancelled = false;
   const frame = (now: number) => {
-    if (!start) start = now;
-    const t = Math.min(1, (now - start) / DRAW_MS);
-    drawMeasurement(canvas, landmarks, width, height, metric, t);
-    compositeDeparting(canvas, from, t);
+    if (cancelled) return;
+    const t = Math.max(0, Math.min(1, (now - start) / DRAW_MS));
+    try {
+      drawMeasurement(canvas, landmarks, width, height, metric, t);
+      if (t > 0) interaction.drawn();
+      compositeDeparting(canvas, from, t);
+    } catch (error) { interaction.finish("error"); throw error; }
     if (t < 1) raf = requestAnimationFrame(frame);
+    else interaction.finish("completed");
   };
   raf = requestAnimationFrame(frame);
-  return { cancel: () => cancelAnimationFrame(raf) };
+  return { cancel: () => {
+    cancelled = true;
+    cancelAnimationFrame(raf);
+    interaction.finish("cancelled");
+  } };
 }
 
 // One snapshot per overlay, reused by both front and side measurement draws.

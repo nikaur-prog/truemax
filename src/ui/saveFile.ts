@@ -35,6 +35,8 @@
 // and the person pressing the button knows better than the heuristic does.
 // ---------------------------------------------------------------------------
 
+import { nativeFileSharingAvailable, shareNativeFile } from "../engine/nativeBridge.js";
+
 export type SaveOutcome = "shared" | "downloaded" | "opened" | "cancelled" | "filed";
 
 // ---------------------------------------------------------------------------
@@ -244,6 +246,10 @@ export async function saveFile(
   kind?: ExportKind,
 ): Promise<SaveOutcome> {
   const file = new File([blob], filename, { type: blob.type });
+  // A future native shell supplies the OS share implementation. Keep errors
+  // and cancellation terminal: a rejected share must not also save a copy.
+  const nativeShare = shareNativeFile(file);
+  if (nativeShare) return nativeShare;
 
   // A folder the operator picked wins over a download, on the desktops that
   // can offer one. Checked before the share sheet only in the sense that the
@@ -303,6 +309,7 @@ export async function saveFile(
 // matches what pressing it will actually do, including when the operator has
 // turned the sheet off.
 export function canShareFiles(type = "video/mp4"): boolean {
+  if (nativeFileSharingAvailable()) return true;
   if (savesDirectly() || !isHandheld()) return false;
   if (typeof navigator.canShare !== "function") return false;
   try {

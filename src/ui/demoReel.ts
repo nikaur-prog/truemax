@@ -1,12 +1,12 @@
 import { METRICS } from "../engine/metrics.js";
 import { REEL as REEL_MEASURED } from "./demoReelData.js";
 import { applyShim } from "./demoReelShim.js";
-import { LABEL_H, LABEL_W } from "./demoReelLayout.js";
+import { LABEL_H, LABEL_W, reelPhotoRect } from "./demoReelLayout.js";
 import { createReelCallouts, createReelImages, createReelValueWriter } from "./demoReelRuntime.js";
 import { previewIsVisible } from "./previewLoop.js";
 
-// The landing reel shows display scores rather than the engine's output, for
-// the reason set out in demoReelShim.ts. `?real=1` returns the measured ones.
+// The current synthetic roster uses precomputed scan values. The legacy shim
+// only addresses named celebrity fixtures, none of which is in this roster.
 const REEL = applyShim(REEL_MEASURED);
 
 // ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@ const REEL = applyShim(REEL_MEASURED);
 // measured from. A number that flashes up in one second reads as a gimmick; a
 // number that arrives after visible work reads as a measurement.
 //
-// Every value on screen is this engine's real output on that photograph.
+// This is a precomputed demonstration, not a live analysis request.
 // ---------------------------------------------------------------------------
 
 // The shape the owner settled on after watching it live: a scan line sweeps
@@ -32,19 +32,14 @@ const T = {
   measure: [1350, 2350],
   score: [2550, 3300],
   pillars: [3300, 4550],
-  regions: [4550, 6550],
-  out: 6650,
-  hold: 6950,
+  regions: [4550, 5600],
+  out: 8400,
+  hold: 8800,
 };
 
 // Count from the engine, not prose: the demo is front-only, and a hardcoded
 // number here drifted (it said 31 while the engine measured 33).
-const STAGES = ["Normalizing pose", `Measuring ${METRICS.length} proportions`, "Comparing against population"];
-// Four characters each: at reel width a full pillar name ran into its own
-// number, and "ANGULARIT" truncated mid-word looks like a bug.
-const PILLAR_ABBR: Record<string, string> = {
-  Harmony: "HARM", Angularity: "ANGL", Dimorphism: "DIMO", Features: "FEAT",
-};
+const STAGES = ["Reading proportions", `Measuring ${METRICS.length} proportions`, "Comparing reference ranges"];
 
 const REGION_LABEL: Record<string, string> = {
   eyes: "Eyes", midface: "Midface", jaw: "Jaw", chin: "Chin",
@@ -84,14 +79,16 @@ export interface ReelOptions {
   compact?: boolean;
   /** The landing canvas is still intersecting when a full-screen panel covers it. */
   pauseWhenCovered?: boolean;
+  /** Optional controls for the full landing demo, never the compact thumbnail. */
+  controls?: { pause: HTMLButtonElement; replay?: HTMLButtonElement };
 }
 
 // The thumbnail cut ends once the score has landed and been readable for a
-// moment. The full card spends 2350ms to 6950ms docking the photograph and
+// moment. The full card spends its later beats docking the photograph and
 // laying out pillars and callouts; compact draws none of that, so running the
 // same clock would park a still photograph on screen for three and a half
 // seconds of every seven. Scan, measure, score, a beat to read it, next face
-// — 4.5s a face against the card's 6.95s.
+// — 4.5s a face against the card's 8.8s.
 //
 // The 900ms between the count-up finishing (3300) and the fade starting is
 // the point of these numbers, not slack: at 3500 the number was on screen at
@@ -117,6 +114,9 @@ export function mountDemoReel(
   let stopped = false;
   let shownAny = false;
   let paused = false;
+  let userPaused = false;
+  let repaintPaused = false;
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
   let waitingForNext = false;
   let w = canvas.clientWidth || canvas.width;
   let h = canvas.clientHeight || canvas.height;
@@ -124,10 +124,9 @@ export function mountDemoReel(
   let reduced = motion?.matches === true;
   const callouts = createReelCallouts();
   const writeValue = createReelValueWriter();
-  const coverRects = new WeakMap<HTMLImageElement, { key: string; width: number; height: number }>();
   const images = createReelImages(REEL.map((face) => `/demo/${face.slug}.jpg`), () => {
     syncImages();
-    requestFrame();
+    requestFrame(true);
   });
   function syncImages(): void {
     if (images.failed(idx)) idx = images.next(idx);
@@ -136,17 +135,26 @@ export function mountDemoReel(
     // the other five portraits merely because it has been mounted.
     if (images.ready(idx) && !reduced) images.ensure(images.next(idx));
   }
-  function requestFrame(): void {
-    if (!stopped && !paused && !raf) raf = requestAnimationFrame(frame);
+  function clearHold(): void {
+    if (holdTimer !== undefined) clearTimeout(holdTimer);
+    holdTimer = undefined;
+  }
+  function requestFrame(repaint = false): void {
+    if (repaint && userPaused && isVisible()) repaintPaused = true;
+    if (!stopped && (!paused || repaintPaused) && !raf) {
+      clearHold();
+      raf = requestAnimationFrame(frame);
+    }
   }
 
   const frame = (now: number) => {
     raf = 0;
-    if (stopped || paused) return;
+    if (stopped || (paused && !repaintPaused)) return;
+    repaintPaused = false;
     const live = images.ready(idx);
     if (!live) return;
     if (!start) start = now;
-    let t = reduced ? (compact ? T.score[1] : T.regions[1]) : now - start;
+    let t = reduced ? (compact ? T.score[1] : T.regions[1]) : paused ? elapsedAtPause : now - start;
     const face = REEL[idx];
     if (!face) return;
     const nextIndex = images.next(idx);
@@ -225,18 +233,12 @@ export function mountDemoReel(
     // height this is an exact fill; as the dock closes, the box gets wider
     // than the picture and the fit crops equally off the top and the bottom,
     // which takes hair and collar and leaves the face untouched in the middle.
-    const rectOf = (source: NonNullable<ReturnType<typeof images.ready>>, zoom: number) => {
-      const key = `${w}:${photoH}`;
-      let rect = coverRects.get(source.image);
-      if (!rect || rect.key !== key) {
-        const scale = Math.max(w / source.width, photoH / source.height);
-        rect = { key, width: source.width * scale, height: source.height * scale };
-        coverRects.set(source.image, rect);
-      }
-      const dw = rect.width * zoom;
-      const dh = rect.height * zoom;
-      return { dx: (w - dw) / 2, dy: (photoH - dh) / 2, dw, dh };
-    };
+    const rectOf = (source: NonNullable<ReturnType<typeof images.ready>>, zoom: number) =>
+      reelPhotoRect(source.width, source.height, w, photoH, zoom);
+    // Stop the push-in before labels arrive. The held result is truly still,
+    // and uses exactly the same image transform for every feature anchor.
+    const zoom = 1 + 0.035 * Math.min(1, t / T.regions[0]);
+    const photoRect = rectOf(live, zoom);
     const drawCover = (source: NonNullable<ReturnType<typeof images.ready>>, zoom: number, a: number) => {
       const r = rectOf(source, zoom);
       ctx.save();
@@ -260,7 +262,7 @@ export function mountDemoReel(
     if (canAdvance && next && fadeOut < 1) {
       drawCover(next, 1, 1);
     }
-    drawCover(live, 1 + 0.04 * Math.min(1, t / TT.hold), alpha);
+    drawCover(live, zoom, alpha);
     ctx.globalAlpha = alpha;
 
     // A quiet vignette over every photograph. The portraits come from many
@@ -347,7 +349,7 @@ export function mountDemoReel(
     if (!compact) {
       const phase =
         t < T.scan[1] ? "SCANNING" : t < T.measure[1] ? "MEASURING" : "ANALYSIS";
-      ctx.font = "600 9.5px Inter Variable, Inter, system-ui, sans-serif";
+      ctx.font = "600 11px Inter Variable, Inter, system-ui, sans-serif";
       ctx.fillStyle = "rgba(255,255,255,0.72)";
       ctx.textAlign = "left";
       ctx.fillText(phase, 14, 22);
@@ -358,11 +360,11 @@ export function mountDemoReel(
         const i = Math.min(STAGES.length - 1, Math.floor(p * STAGES.length));
         ctx.font = "500 11.5px Inter Variable, Inter, system-ui, sans-serif";
         ctx.fillStyle = "rgba(255,255,255,0.9)";
-        ctx.fillText(`${STAGES[i]}…`, 14, 42);
+        ctx.fillText(`${STAGES[i]}…`, 14, 66);
         ctx.fillStyle = "rgba(255,255,255,0.22)";
-        ctx.fillRect(14, 50, w - 28, 2);
+        ctx.fillRect(14, 74, w - 28, 2);
         ctx.fillStyle = "#8FF3E0";
-        ctx.fillRect(14, 50, (w - 28) * p, 2);
+        ctx.fillRect(14, 74, (w - 28) * p, 2);
       }
 
       // ---- the panel --------------------------------------------------------
@@ -378,11 +380,11 @@ export function mountDemoReel(
       // ---- pillars ----------------------------------------------------------
       if (t >= T.pillars[0]) {
         const names = Object.keys(face.pillars);
-        const bw = (w - 28 - (names.length - 1) * 8) / names.length;
+        const bw = (w - 40) / 2;
         names.forEach((n, i) => {
           const appear = seg(t, T.pillars[0] + i * 170, T.pillars[0] + i * 170 + 380);
           if (appear <= 0) return;
-          const x = 14 + i * (bw + 8);
+          const x = 14 + (i % 2) * (bw + 12);
           // Anchored a fixed distance off the BOTTOM of the frame, not to a
           // fraction of the panel. The fraction put the row wherever the panel
           // happened to be tall, while the name above it is positioned in CSS
@@ -390,19 +392,20 @@ export function mountDemoReel(
           // which is exactly how the name ended up printed through the bars.
           // One origin now, and the gap between them is arithmetic rather than
           // luck. Undocked, it rides the seam down as before.
-          const y = dockT > 0.001 ? h - 32 - (1 - dockT) * (h - 32 - photoH) : photoH;
+          const settledY = h - 58 + Math.floor(i / 2) * 28;
+          const y = photoH + (settledY - photoH) * dockT;
           ctx.globalAlpha = alpha * appear;
           ctx.fillStyle = "rgba(255,255,255,0.2)";
-          ctx.fillRect(x, y + 16, bw, 3);
+          ctx.fillRect(x, y + 17, bw, 2);
           ctx.fillStyle = "#8FF3E0";
           // Eased, not linear: a bar that decelerates into its value reads as a
           // measurement arriving; one that fills at constant speed reads as a
           // loading indicator.
-          ctx.fillRect(x, y + 16, bw * (face.pillars[n] / 10) * ease(appear), 3);
-          ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
+          ctx.fillRect(x, y + 17, bw * (face.pillars[n] / 10) * ease(appear), 2);
+          ctx.font = "500 11px Inter Variable, Inter, system-ui, sans-serif";
           ctx.fillStyle = "rgba(255,255,255,0.66)";
-          ctx.fillText(PILLAR_ABBR[n] ?? n.slice(0, 4).toUpperCase(), x, y + 10);
-          ctx.font = "600 11px Inter Variable, Inter, system-ui, sans-serif";
+          ctx.fillText(n, x, y + 10);
+          ctx.font = "600 13px Inter Variable, Inter, system-ui, sans-serif";
           ctx.fillStyle = "#fff";
           ctx.textAlign = "right";
           ctx.fillText(face.pillars[n].toFixed(1), x + bw, y + 10);
@@ -416,8 +419,12 @@ export function mountDemoReel(
         // Docked, the score is on its own panel and the whole photograph is
         // free — only a small margin off the bottom edge so a label never
         // straddles the seam.
-        const { outs, placed } = callouts(face, w, photoH, 150 - 132 * dockT);
-        const appearOf = (i: number) => seg(t, T.regions[0] + i * 430, T.regions[0] + i * 430 + 420);
+        const { outs, placed } = callouts(face, w, photoH, 150 - 132 * dockT, photoRect);
+        const appearOf = (i: number) => {
+          const point = placed[i]!;
+          if (point.ax < 0 || point.ax > w || point.ay < 0 || point.ay > photoH) return 0;
+          return seg(t, T.regions[0] + i * 350, T.regions[0] + i * 350 + 300);
+        };
 
         // Two passes with a scrim between them. The layout keeps LABELS out of
         // the caption band, but a connector from a chin anchor to a label above
@@ -429,16 +436,13 @@ export function mountDemoReel(
           if (appear <= 0) return;
           ctx.globalAlpha = alpha * appear;
           const { ax, ay, lx, ly, left } = placed[i]!;
-          // The connector DRAWS from the anchor to the label rather than
-          // appearing whole — the eye follows it from the feature to the
-          // number, which is the causal order the interface is claiming.
-          const grow = ease(appear);
+          // A short fade keeps the feature and its number readable together.
           const tx = left ? lx + LABEL_W : lx;
           ctx.strokeStyle = "rgba(143,243,224,0.85)";
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(ax, ay);
-          ctx.lineTo(ax + (tx - ax) * grow, ay + (ly + 9 - ay) * grow);
+          ctx.lineTo(tx, ly + LABEL_H / 2);
           ctx.stroke();
         });
 
@@ -469,18 +473,18 @@ export function mountDemoReel(
 
           // The label settles its last few pixels into place along the same
           // direction the line travelled.
-          const slide = (1 - grow) * (left ? 6 : -6);
+          const slide = (1 - grow) * (left ? 2 : -2);
           ctx.translate(slide, 0);
           ctx.fillStyle = "rgba(16,17,19,0.72)";
           ctx.beginPath();
-          ctx.roundRect(lx, ly - 4, LABEL_W, LABEL_H, 7);
+          ctx.roundRect(lx, ly, LABEL_W, LABEL_H, 8);
           ctx.fill();
-          ctx.font = "600 8.5px Inter Variable, Inter, system-ui, sans-serif";
+          ctx.font = "500 11px Inter Variable, Inter, system-ui, sans-serif";
           ctx.fillStyle = "rgba(255,255,255,0.62)";
-          ctx.fillText((REGION_LABEL[r.id] ?? r.id).toUpperCase(), lx + 7, ly + 6);
-          ctx.font = "600 12px Inter Variable, Inter, system-ui, sans-serif";
+          ctx.fillText(REGION_LABEL[r.id] ?? r.id, lx + 8, ly + 13);
+          ctx.font = "600 14px Inter Variable, Inter, system-ui, sans-serif";
           ctx.fillStyle = "#fff";
-          ctx.fillText(r.score.toFixed(1), lx + 7, ly + 18);
+          ctx.fillText(r.score.toFixed(1), lx + 8, ly + 28);
           ctx.translate(-slide, 0);
           ctx.globalAlpha = alpha;
         });
@@ -536,13 +540,19 @@ export function mountDemoReel(
     const bottom = `${(108 - 32 * dockT).toFixed(1)}px`;
     if (cap) writeValue("bottom", bottom, () => { cap.style.bottom = bottom; });
 
-    if (!reduced && canAdvance && t >= TT.hold) {
+    if (!paused && !reduced && canAdvance && t >= TT.hold) {
       idx = nextIndex;
       start = now;
       shownAny = true;
       syncImages();
     }
-    if (!reduced && !waitingForNext) requestFrame();
+    if (!paused && !reduced && !waitingForNext) {
+      if (!compact && t >= T.regions[1] && t < TT.out) {
+        // No painting loop during the readable result hold. Wake only when
+        // the crossfade needs to begin, or on a resize/control event.
+        holdTimer = setTimeout(() => { holdTimer = undefined; requestFrame(); }, TT.out - t);
+      } else requestFrame();
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -568,6 +578,8 @@ export function mountDemoReel(
     if (paused || stopped) return;
     elapsedAtPause = start ? performance.now() - start : 0;
     paused = true;
+    repaintPaused = false;
+    clearHold();
     cancelAnimationFrame(raf);
     raf = 0;
   };
@@ -579,12 +591,45 @@ export function mountDemoReel(
     start = performance.now() - elapsedAtPause;
     requestFrame();
   };
-  const syncVisibility = () => {
+  function isVisible(): boolean {
     const covered = opts.pauseWhenCovered === true
       && document.querySelector('.dash, [aria-modal="true"], dialog[open]') !== null;
-    if (previewIsVisible(!document.hidden, inViewport, canvas.isConnected, covered)) resume();
+    return previewIsVisible(!document.hidden, inViewport, canvas.isConnected, covered);
+  }
+  const syncVisibility = () => {
+    if (isVisible() && !userPaused) resume();
     else pause();
   };
+  const updateControls = (): void => {
+    const controls = opts.controls;
+    if (!controls) return;
+    controls.pause.disabled = reduced;
+    if (controls.replay) controls.replay.disabled = reduced;
+    controls.pause.setAttribute("aria-pressed", String(userPaused));
+    controls.pause.setAttribute("aria-label", userPaused ? "Resume demo" : "Pause demo");
+    controls.pause.title = reduced ? "Reduced motion is enabled" : userPaused ? "Resume demo" : "Pause demo";
+    if (controls.replay) controls.replay.title = reduced ? "Reduced motion is enabled" : "Replay demo";
+  };
+  const togglePause = (): void => {
+    if (reduced || stopped) return;
+    userPaused = !userPaused;
+    updateControls();
+    syncVisibility();
+  };
+  const replay = (): void => {
+    if (reduced || stopped) return;
+    clearHold();
+    userPaused = false;
+    elapsedAtPause = 0;
+    start = performance.now();
+    waitingForNext = false;
+    updateControls();
+    syncVisibility();
+    requestFrame();
+  };
+  opts.controls?.pause.addEventListener("click", togglePause);
+  opts.controls?.replay?.addEventListener("click", replay);
+  updateControls();
   const io =
     typeof IntersectionObserver === "function"
       ? new IntersectionObserver(
@@ -607,7 +652,7 @@ export function mountDemoReel(
   const resize = (): void => {
     w = canvas.clientWidth || w;
     h = canvas.clientHeight || h;
-    requestFrame();
+    requestFrame(true);
   };
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(resize) : null;
   resizeObserver?.observe(canvas);
@@ -616,8 +661,11 @@ export function mountDemoReel(
     reduced = motion?.matches === true;
     waitingForNext = false;
     start = 0;
+    elapsedAtPause = 0;
+    clearHold();
+    updateControls();
     syncImages();
-    requestFrame();
+    requestFrame(true);
   };
   motion?.addEventListener?.("change", motionChanged);
   syncImages();
@@ -627,10 +675,13 @@ export function mountDemoReel(
     stop() {
       if (stopped) return;
       stopped = true;
+      clearHold();
       io?.disconnect();
       panelObserver?.disconnect();
       resizeObserver?.disconnect();
       images.stop();
+      opts.controls?.pause.removeEventListener("click", togglePause);
+      opts.controls?.replay?.removeEventListener("click", replay);
       window.removeEventListener("resize", resize);
       motion?.removeEventListener?.("change", motionChanged);
       document.removeEventListener("visibilitychange", syncVisibility);

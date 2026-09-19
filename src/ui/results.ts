@@ -18,7 +18,8 @@ import { resetTapPreview, wireMetricButton, wireTapPreview } from "./tapPreview.
 import { drawCalm, transitionRegion } from "./overlay.js";
 import { animateMeasurement, drawMeasurement, measurementBounds, transitionMeasurement } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
-import { animateSideMeasurement, drawSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
+import { animateSideMeasurement, drawSideMeasurement, drawSideRestingPoints, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
+import { paintPhotoCanvas, rasterSizeFor, sidePointsForRaster } from "./interactiveRaster.js";
 import { closeMetricDetail, isMetricDetailOpen, openMetricDetail } from "./metricDetail.js";
 import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
 import { commitProtocol, offerProtocol, protocolFor, readProtocols, startKindFor, writeProtocols } from "../engine/protocol.js";
@@ -32,6 +33,7 @@ import { stopTypewriter } from "./typewriter.js";
 import { chosenGoals, goalBoost, goalsTouching, isQuiet, loadProfile, skinConcernLabels } from "../engine/goals.js";
 import { openQuiz } from "./goalsQuiz.js";
 import { EVIDENCE_LABEL, RECS, buyGuideFor, recsFor, productSearchUrl } from "../engine/recommendations.js";
+import { productDestinationFor } from "../engine/productDestinations.js";
 import type { Rec } from "../engine/recommendations.js";
 import { loadVoiceCredits, startScanCreditCheckout, startVoiceCreditCheckout } from "../engine/entitlement.js";
 import { scanPrice } from "../engine/scanPricing.js";
@@ -805,6 +807,23 @@ function select(id: string, forceView?: "front" | "side", opts: { silent?: boole
 let shownRegion: RegionId | null = null;
 let transition: { cancel(): void } | null = null;
 
+// Measurement overlays repaint every animation frame; retained scan pixels do
+// not need to. Keep the static photo and export sources at their original size,
+// while drawing the interactive construction at the displayed stage's density.
+function frontRaster(): { width: number; height: number } {
+  return rasterSizeFor(ctx!.overlay, ctx!.photoW, ctx!.photoH);
+}
+
+function sideRaster(): { points: SidePoints; width: number; height: number } | null {
+  if (!ctx?.sidePhoto || !ctx.sidePoints) return null;
+  const { width, height } = rasterSizeFor(ctx.overlay, ctx.sidePhoto.width, ctx.sidePhoto.height);
+  return {
+    width,
+    height,
+    points: sidePointsForRaster(ctx.sidePoints, ctx.sidePhoto.width, ctx.sidePhoto.height, width, height),
+  };
+}
+
 function setZoom(region: RegionId | null): void {
   if (!ctx) return;
   // A fast tab-to-tab click must not leave two animations fighting over the
@@ -845,11 +864,12 @@ function setZoom(region: RegionId | null): void {
   shownRegion = region;
 
   // Nothing to animate between on the very first paint of the calm state.
+  const { width, height } = frontRaster();
   if (!from && !to) {
-    drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH);
+    drawCalm(ctx.overlay, ctx.landmarks, width, height);
     return;
   }
-  transition = transitionRegion(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, from, to);
+  transition = transitionRegion(ctx.overlay, ctx.landmarks, width, height, from, to);
 }
 
 function body(): HTMLElement {
@@ -880,15 +900,21 @@ function showPhoto(which: "front" | "side"): void {
     paint(canvas, ctx.sidePhoto);
     ctx.overlay.getContext("2d")?.clearRect(0, 0, ctx.overlay.width, ctx.overlay.height);
     if (label) label.textContent = "SIDE";
-    if (cap) cap.textContent = "POINTS CHECKED";
+    if (cap) cap.textContent = ctx.sideVerified === true
+      ? "POINTS CHECKED"
+      : ctx.sideVerified === false ? "POINTS NEED REVIEW" : "PROFILE CAPTURE";
     if (quality) {
-      quality.innerHTML = `<span class="qchip">Profile capture</span><span class="qchip">13 landmarks checked by you</span>`;
+      const review = ctx.sideVerified === true
+        ? "13 landmarks checked by you"
+        : ctx.sideVerified === false ? "Point placement not confirmed" : "Point review not recorded";
+      quality.innerHTML = `<span class="qchip">Profile capture</span><span class="qchip">${review}</span>`;
     }
     shownPhoto = "side";
     setFaceCrop("side");
   } else if (which === "front" && frontPhoto) {
     paint(canvas, frontPhoto);
-    drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH);
+    const { width, height } = frontRaster();
+    drawCalm(ctx.overlay, ctx.landmarks, width, height);
     if (label) label.textContent = "FRONT";
     if (cap) cap.textContent = "ANALYZED";
     if (quality) quality.innerHTML = frontQualityHTML;
@@ -901,11 +927,7 @@ function showPhoto(which: "front" | "side"): void {
 // there is no longer a way for the profile to become "the front photograph".
 let frontPhoto: HTMLCanvasElement | null = null;
 function paint(dst: HTMLCanvasElement, src: HTMLCanvasElement): void {
-  dst.width = src.width;
-  dst.height = src.height;
-  const g = dst.getContext("2d")!;
-  g.clearRect(0, 0, dst.width, dst.height);
-  g.drawImage(src, 0, 0);
+  paintPhotoCanvas(dst, src);
 }
 
 function mobileRegionFocused(): boolean {
@@ -971,7 +993,8 @@ function restoreVisiblePhoto(): void {
       ? ctx.sideReport?.regions.flatMap((region) => region.metrics).find((item) => item.def.id === sideActive)
       : null;
     if (metric && ctx.sidePoints) {
-      drawSideMeasurement(ctx.overlay, ctx.sidePoints, ctx.sidePhoto.width, ctx.sidePhoto.height, metric);
+      const raster = sideRaster()!;
+      drawSideMeasurement(ctx.overlay, raster.points, raster.width, raster.height, metric);
     } else {
       drawSidePoints();
     }
@@ -983,8 +1006,9 @@ function restoreVisiblePhoto(): void {
   const metric = activeMetric
     ? ctx.report.metrics.find((item) => item.def.id === activeMetric)
     : null;
-  if (metric) drawMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
-  else drawCalm(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, shownRegion ? REGION_LANDMARKS[shownRegion] : undefined);
+  const { width, height } = frontRaster();
+  if (metric) drawMeasurement(ctx.overlay, ctx.landmarks, width, height, metric);
+  else drawCalm(ctx.overlay, ctx.landmarks, width, height, shownRegion ? REGION_LANDMARKS[shownRegion] : undefined);
   setFaceCrop("front");
 }
 
@@ -1190,9 +1214,11 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
         const onSide = metric.def.view === "side" && Boolean(ctx.sidePhoto && ctx.sidePoints);
         showPhoto(onSide ? "side" : "front");
         focusMeasurement(metric, metric.def.region, onSide);
-        pillarFade = onSide && ctx.sidePhoto && ctx.sidePoints
-          ? animateSideMeasurement(ctx.overlay, ctx.sidePoints, ctx.sidePhoto.width, ctx.sidePhoto.height, metric)
-          : animateMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric);
+        const side = onSide ? sideRaster() : null;
+        const { width, height } = frontRaster();
+        pillarFade = side
+          ? animateSideMeasurement(ctx.overlay, side.points, side.width, side.height, metric)
+          : animateMeasurement(ctx.overlay, ctx.landmarks, width, height, metric);
       });
       row.addEventListener("pointerleave", () => {
         pillarRevert = window.setTimeout(restoreReportPhoto, LEAVE_GRACE_MS);
@@ -1228,9 +1254,6 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
 let sideFade: OverlayFade | null = null;
 function wireSideMeasurementTaps(report: Report): void {
   if (!ctx?.sidePoints || !ctx.sidePhoto) return;
-  const pts = ctx.sidePoints;
-  const w = ctx.sidePhoto.width;
-  const h = ctx.sidePhoto.height;
   const metrics = report.regions.flatMap((r) => r.metrics);
   sideActive = null;
   sideFade?.cancel();
@@ -1289,8 +1312,10 @@ function wireSideMeasurementTaps(report: Report): void {
     setHints(metric ?? null);
     sideFade?.cancel();
     if (metric) {
-      sideFade = animateSideMeasurement(ctx.overlay, pts, w, h, metric);
-      const b = sideMeasurementBounds(metric, pts, w, h);
+      const raster = sideRaster();
+      if (!raster) return;
+      sideFade = animateSideMeasurement(ctx.overlay, raster.points, raster.width, raster.height, metric);
+      const b = sideMeasurementBounds(metric, raster.points, raster.width, raster.height);
       aimSide(b ? zoomToBounds(b, { fill: 0.55, min: 1.15, max: 2.3 }) : IDENTITY_ZOOM);
     } else {
       drawSidePoints();
@@ -1355,19 +1380,8 @@ function drawSidePoints(): void {
     g.clearRect(0, 0, overlay.width, overlay.height);
     return;
   }
-  overlay.width = src.width;
-  overlay.height = src.height;
-  g.clearRect(0, 0, src.width, src.height);
-  const r = Math.max(3, src.width / 150);
-  for (const p of Object.values(pts)) {
-    g.beginPath();
-    g.arc(p.x, p.y, r, 0, Math.PI * 2);
-    g.fillStyle = "rgba(255,255,255,0.9)";
-    g.fill();
-    g.lineWidth = Math.max(1, r * 0.3);
-    g.strokeStyle = "rgba(10,20,17,0.7)";
-    g.stroke();
-  }
+  const raster = sideRaster()!;
+  drawSideRestingPoints(overlay, raster.points, raster.width, raster.height);
 }
 
 function deltaChip(delta: number, label: string): string {
@@ -2463,11 +2477,12 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
       metric && hasSideOverlay(metric.def.id) && ctx.sidePoints && ctx.sidePhoto;
     if (onSide && ctx.sidePhoto && ctx.sidePoints) {
       showPhoto("side");
+      const raster = sideRaster()!;
       fade = animateSideMeasurement(
         ctx.overlay,
-        ctx.sidePoints,
-        ctx.sidePhoto.width,
-        ctx.sidePhoto.height,
+        raster.points,
+        raster.width,
+        raster.height,
         metric,
       );
       focusMeasurement(metric, region, true);
@@ -2480,11 +2495,12 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
     // the calm region instead, because a region outline has no natural
     // direction to grow along and animating it would just be motion for its
     // own sake.
+    const { width, height } = frontRaster();
     fade = metric
-      ? animateMeasurement(ctx.overlay, ctx.landmarks, ctx.photoW, ctx.photoH, metric)
+      ? animateMeasurement(ctx.overlay, ctx.landmarks, width, height, metric)
       : transitionMeasurement(ctx.overlay, (target) => {
           if (!ctx) return;
-          drawCalm(target, ctx.landmarks, ctx.photoW, ctx.photoH, REGION_LANDMARKS[region]);
+          drawCalm(target, ctx.landmarks, width, height, REGION_LANDMARKS[region]);
         });
     focusMeasurement(metric ?? null, region, false);
     shownRegion = region;
@@ -2616,14 +2632,11 @@ function showImprove(): void {
   // an entitlement lapsing while the tab is already open.
   const gated = depth !== "plan";
 
-  // The percentile translation sits beside the ceiling everywhere the ceiling
-  // appears. On a PSL-shaped scale a 7 reads as "a bit above average" to
-  // anyone who has not internalised the curve, when it is actually rarer than
-  // one face in twenty — the percentage is the number that lands.
+  // This is a modelled score scenario, not a personal outcome forecast.
   const potPct = rankShort(aggregateScoreToPercentile(r.potential));
   const planBody = `<div class="pot"><div class="n">${r.overall.toFixed(1)}</div><div class="arr">→</div>
         <div class="n p">${r.potential.toFixed(1)}</div><span class="pot-pct">${potPct}</span>
-        <p>Potential recomputed from your fixable metrics only. Habits, composition and grooming, with no surgery anywhere.</p></div>
+        <p>A modelled scenario using metrics the engine marks as changeable. It is not a prediction or a promise that a routine will produce this score.</p></div>
       ${goalHead(profile)}
       ${goalDraftPanel(morph.selected)}
       ${morphPreviewHTML({ selected: morph.selected, maxVision: morph.maxVision, renderEnabled: morphRenderEnabled })}
@@ -2654,7 +2667,7 @@ function showImprove(): void {
           <b>${lever.title}<em>${REGION_NAMES[m.def.region].toUpperCase()} · ${m.score.toFixed(1)} · ${lever.tag}</em></b>
           <p>${copy}</p>
           ${why.length ? `<span class="because">Because you chose ${why.map((g) => g.label.toLowerCase()).join(" + ")}</span>` : ""}
-          <span class="why">MOVES ${m.def.pillar.toUpperCase()} →</span></div>`;
+          <span class="why">RELATED TO ${m.def.pillar.toUpperCase()}</span></div>`;
         })
         .join("")}
       ${unmeasured
@@ -2669,14 +2682,7 @@ function showImprove(): void {
       ${recsHTML(profile)}
       ${maxAccess || gated ? "" : upsell()}`;
 
-  // Past the free allowance, the plan is the sell — and the sell leads with the
-  // one number that keeps people here: the ceiling. The potential is stated
-  // plainly on the card, not blurred, because it is a real measurement (the
-  // engine recomputes the score from the fixable metrics alone) and a stated
-  // ceiling is a reason to subscribe where a blurred one is a taunt. What sits
-  // behind the blur is the pathway TO it — every step already written, from
-  // this person's own measurements, which is why the structure shows through:
-  // the volume of finished work is the product.
+  // Show the modelled scenario with its limits, not as a promised paid outcome.
   body().innerHTML = `
     <div class="reveal">
       ${askMaxCard()}
@@ -2684,10 +2690,10 @@ function showImprove(): void {
         ? `<div class="lockwrap">
             <div class="lockblur" aria-hidden="true" inert>${planBody}</div>
             <div class="lockcard lockcard-ceiling">
-              <span class="lockcard-eyebrow">YOUR CEILING</span>
-              <h4>Our system reckons your potential is a good deal higher.</h4>
+              <span class="lockcard-eyebrow">YOUR PLAN</span>
+              <h4>Explore practical next steps from your scan.</h4>
               ${ceilingCtaMarkup({ overall: r.overall, potential: r.potential, photo: frontPhoto })}
-              <p>The route between those two numbers is already written below, step by step, from your own measurements. Unlock it to read it.</p>
+              <p>Review suggestions linked to your measurements and goals, then choose what fits your routine. Changes in a photo score do not prove that a habit worked.</p>
               <div class="navrow"><button class="btn pri" id="btn-unlock">See my full pathway · 7 days free</button></div>
             </div>
           </div>`
@@ -3258,6 +3264,7 @@ function buyBlock(r: Rec): string {
   const guide = buyGuideFor(r);
   if (!guide) return "";
   const url = productSearchUrl(r);
+  const destination = productDestinationFor(r);
   return `<div class="rec-buy">
     <span class="rec-buy-h">WHAT TO BUY</span>
     <b class="rec-buy-cat">${guide.category}</b>
@@ -3265,7 +3272,9 @@ function buyBlock(r: Rec): string {
     <p class="rec-buy-eg">${guide.example}</p>
     <p class="rec-buy-where"><i aria-hidden="true">◎</i>${guide.where}</p>
     ${
-      url
+      destination
+        ? `<a class="rec-find" href="${destination.url}" target="_blank" rel="noopener noreferrer">${destination.label} <span aria-hidden="true">↗</span></a><p class="rec-buy-where">Manufacturer product information (${destination.region}). One example, not a promise of results or local stock.</p>`
+        : url
         ? `<a class="rec-find" href="${url}" target="_blank" rel="noopener noreferrer">Compare what is sold near you <span aria-hidden="true">↗</span></a>`
         : ""
     }

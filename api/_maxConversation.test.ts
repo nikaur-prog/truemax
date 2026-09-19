@@ -33,3 +33,15 @@ test("not-working language changes the named item without interpreting a questio
   assert.equal(parsePlanMemoryCommand("How is my progress tracking?"), null);
   assert.equal(parsePlanMemoryCommand("Is my cleanser working?"), null);
 });
+
+test("unresolved pronouns are never persisted as a named plan item", () => {
+  for (const message of ["Add that to my plan", "Add this routine to my plan", "Add it to my plan", "That isn't working", "The above isn't working"]) {
+    assert.equal(parsePlanMemoryCommand(message), null, message);
+  }
+});
+
+test("chat notes cannot overwrite the reserved routine identity namespace", () => {
+  assert.equal(parsePlanMemoryCommand("Add protocol:sleep-1700000000000 to my plan"), null);
+  assert.equal(parsePlanMemoryCommand("Protocol:sleep-1700000000000 isn't working"), null);
+  assert.equal(parsePlanMemoryCommand("Add my sleep protocol to my plan")?.kind, "add");
+});

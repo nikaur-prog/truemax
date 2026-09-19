@@ -8,6 +8,7 @@ import type { Max3DRuntime, Max3DState } from "./max3d.js";
 import { setMax3DActive } from "./maxMotion.js";
 import { createMax3DSchedule, createMaxSpeechOverlay, MAX_3D_STATES, normalizeMaxSpeechLevel } from "./max3dSchedule.js";
 import { createMax3DPlayback } from "./max3dPlayback.js";
+import maxAsset from "../../public/brand/max-rig-v1.json";
 
 const FRAME_MS = 1000 / 30;
 export async function createMax3D(
@@ -15,7 +16,7 @@ export async function createMax3D(
   signal: AbortSignal, onFailure: () => void,
   mayStart: () => boolean = () => true,
 ): Promise<Max3DRuntime> {
-  const response = await fetch("/brand/max-rig-v1.glb", { signal, credentials: "omit", cache: import.meta.env?.DEV ? "no-store" : "force-cache" });
+  const response = await fetch(`/brand/max-rig-v1.glb?v=${maxAsset.version}`, { signal, credentials: "omit", cache: import.meta.env?.DEV ? "no-store" : "force-cache" });
   if (!response.ok) throw new Error("Character asset unavailable");
   const data = await response.arrayBuffer();
   signal.throwIfAborted();
@@ -132,9 +133,16 @@ export async function createMax3D(
       // Development clip export copies the live drawing buffer synchronously.
       if (import.meta.env?.DEV) canvas.dispatchEvent(new Event("max3dframe", { bubbles: true }));
     }
-    if (schedule.state() !== "quiet" || playback.transitioning()) frame = requestAnimationFrame(tick);
+    const animating = schedule.state() !== "quiet" || playback.transitioning();
+    canvas.dataset.motion = animating ? "animating" : "settled";
+    if (animating) frame = requestAnimationFrame(tick);
   };
-  const requestPaint = (): void => { if (!dead && !paused && frame === null) frame = requestAnimationFrame(tick); };
+  const requestPaint = (): void => {
+    if (!dead && !paused && frame === null) {
+      canvas.dataset.motion = "pending";
+      frame = requestAnimationFrame(tick);
+    }
+  };
   const setState = (next: Max3DState): void => {
     if (dead || !MAX_3D_STATES.includes(next)) return;
     schedule.setState(next);
@@ -188,7 +196,7 @@ export async function createMax3D(
     pause(next) {
       if (dead || paused === next) return;
       paused = next; last = null;
-      if (paused) { if (frame !== null) cancelAnimationFrame(frame); frame = null; showFallback(); painted = false; }
+      if (paused) { if (frame !== null) cancelAnimationFrame(frame); frame = null; canvas.dataset.motion = "paused"; showFallback(); painted = false; }
       else requestPaint();
     },
     dispose,

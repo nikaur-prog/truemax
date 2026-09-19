@@ -3,7 +3,7 @@
 // prose. A generated sentence must never become profile state by accident.
 
 const PLAN_REQUESTS = [
-  /\b(?:make|build|create|give|write|put together)\s+(?:me\s+)?(?:a\s+)?(?:plan|routine|programme|program)\b/i,
+  /\b(?:make|build|create|give|write|put together)\s+(?:me\s+)?(?:a\s+)?(?:(?:practical|simple|manageable|daily|weekly)\s+)?(?:plan|routine|programme|program)\b/i,
   /\b(?:plan|routine|programme|program)\s+(?:for|around)\s+me\b/i,
   /\bwhat\s+should\s+i\s+do\b/i,
   /\bturn\s+(?:this|that|it)\s+into\s+(?:a\s+)?(?:plan|routine)\b/i,

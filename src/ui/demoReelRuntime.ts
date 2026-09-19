@@ -1,5 +1,5 @@
 import type { ReelFace, ReelRegion } from "./demoReelData.js";
-import { placeCallouts } from "./demoReelLayout.js";
+import { placeCallouts, type ReelPhotoRect } from "./demoReelLayout.js";
 
 /** Load only requested portraits. A decoded still is the handover boundary. */
 export function createReelImages(
@@ -57,18 +57,18 @@ export function createReelImages(
 /** Sort once per face and only place labels when their geometry changes. */
 export function createReelCallouts() {
   const faces = new WeakMap<ReelFace, { outs: ReelRegion[]; key: string; placed: ReturnType<typeof placeCallouts> }>();
-  return (face: ReelFace, width: number, height: number, reserve: number) => {
+  return (face: ReelFace, width: number, height: number, reserve: number, rect?: ReelPhotoRect) => {
     let cached = faces.get(face);
     if (!cached) {
       const sorted = [...face.regions].sort((a, b) => b.score - a.score);
-      const outs = sorted.length < 3 ? sorted : [sorted[0], sorted[sorted.length >> 1], sorted[sorted.length - 1]];
+      const outs = sorted.length < 2 ? sorted : [sorted[0], sorted[sorted.length - 1]];
       cached = { outs, key: "", placed: [] };
       faces.set(face, cached);
     }
-    const key = `${width}:${height}:${reserve}`;
+    const key = `${width}:${height}:${reserve}:${rect?.dx}:${rect?.dy}:${rect?.dw}:${rect?.dh}`;
     if (cached.key !== key) {
       cached.key = key;
-      cached.placed = placeCallouts(cached.outs, width, height, reserve);
+      cached.placed = placeCallouts(cached.outs, width, height, reserve, rect);
     }
     return cached;
   };

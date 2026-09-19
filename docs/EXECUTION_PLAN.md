@@ -1,5 +1,22 @@
 # TrueMax Execution Plan
 
+## Current publication instructions: 19 September 2026
+
+See [Calibration preparation release](RELEASE_CALIBRATION_2026-09-19.md). The owner now requests merge and production availability before beginning their calibration set. The following handoff is historical; its publication order and verification totals are superseded. Its unfinished accuracy, cloud-history and live-quality work remains outstanding.
+
+## Historical handoff status: 11 September 2026
+
+Continue from [Claude handoff](CLAUDE_HANDOFF_2026-09-11.md). The phase history below is retained for context: historical “DONE” labels, especially scoring calibration, do not close the current calibration pilot or the wider roadmap.
+
+- Working state: dirty local branch `codex/post-267-audit`, HEAD `60158b0`. Current work is unmerged.
+- Last completed local verification: **2048 tests passed, 0 failed, 28 skipped, 1 todo**; typecheck (`npx tsc --noEmit`), build, and emdash check passed in the previous run. No gates were rerun for this documentation-only update.
+- Next calibration gate: verify an admin-authenticated preview, then collect matched FaceIQ evidence and manually reviewed landmark corrections. Those inputs remain pending, not completed calibration.
+- Live Max evaluation and real-device iOS profiling are still pending.
+- Keep the default-off `VITE_MORPH_PREVIEW` frontend gate off until atomic idempotency is verified. Deployed state is unverified; a matching server kill switch is not implemented.
+- Full automatic cloud routine history still requires a dedicated schema. Existing private backup/import and recent-only cloud continuity are not a complete historical cloud archive.
+
+---
+
 The single ordered plan for fixing and finishing the build. It folds together
 the Master Build Plan (Stages 0–15), the TikTok Breakdown masterplan (T1–T6),
 the scoring-calibration diagnosis, and the Stage 0/1 work done in the local

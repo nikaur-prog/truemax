@@ -1,5 +1,10 @@
 # Front-only face-rater carousel
 
+> Status, 11 September 2026: Retain this as the content-workstream plan. The latest batch focused on calibration, Coach and recovery; do not infer complete carousel delivery from those checks. See the
+> [current continuation handoff](CLAUDE_HANDOFF_2026-09-11.md) for branch preservation,
+> verification evidence and the next execution order. Historical details below
+> do not imply that the whole roadmap has shipped.
+
 Plan only, 9 September 2026. No carousel code, photo uploads, renders, purchases or posts are included in this change.
 
 ## Outcome

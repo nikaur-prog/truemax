@@ -21,14 +21,16 @@ import { METRICS } from "../engine/metrics.js";
 const asMetric = (id: string, region = "jaw"): ScoredMetric =>
   ({ def: { id, region, decimals: 1, unit: "°" }, value: 100 }) as unknown as ScoredMetric;
 
-test("a side construction renders on the profile whenever the profile exists", () => {
+test("each construction needs its own photograph, never the opposite view", () => {
   const gonial = asMetric("gonialAngle");
   assert.equal(stageViewFor(gonial, true, true), "side");
-  // Without the profile it falls back to the front's region lighting, the
-  // same honest fallback the main pane uses, rather than rendering nothing.
-  assert.equal(stageViewFor(gonial, false, true), "front");
+  assert.equal(stageViewFor(gonial, false, true), null);
+  assert.equal(stageViewFor(gonial, true, false), "side");
+  assert.equal(stageViewFor(gonial, false, false), null);
   const fwhr = asMetric("fwhr", "midface");
   assert.equal(stageViewFor(fwhr, true, true), "front");
+  assert.equal(stageViewFor(fwhr, true, false), null);
+  assert.equal(stageViewFor(fwhr, false, true), "front");
   assert.equal(stageViewFor(fwhr, false, false), null);
 });
 

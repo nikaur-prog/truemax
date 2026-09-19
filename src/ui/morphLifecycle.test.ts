@@ -7,6 +7,7 @@ import type { MorphRenderState } from "../engine/morphContract.js";
 import { pollMorphRender } from "../engine/morphContract.js";
 import { wireMorphPreview } from "./morphPreview.js";
 import { ensureGoalPreviewConsent } from "./goalPreviewConsent.js";
+import type { MorphRequestMarker, SavedMorphPreview } from "../engine/morphRecovery.js";
 
 const PIXEL = "data:image/jpeg;base64," + Buffer.alloc(400, 7).toString("base64");
 const report: Report = { sex: "female", overall: 5, overallPercentile: 50, overallZ: 0, potential: 6, pillars: { Harmony: 5, Angularity: 5, Dimorphism: 5, Features: 5 }, regions: [], metrics: [], zScores: {} };
@@ -34,7 +35,9 @@ class Element extends EventTarget {
   className = "";
   innerHTML = "";
   src = "";
+  value = "";
   onclick: (() => unknown) | null = null;
+  onchange: (() => unknown) | null = null;
   nodes = new Map<string, Element[]>();
   attributes = new Map<string, string>();
   classes = new Set<string>();
@@ -57,12 +60,14 @@ class Element extends EventTarget {
 
 function fixture(overrides: Parameters<typeof wireMorphPreview>[2] = {}) {
   const host = new Element(), shell = new Element(), create = new Element(), output = new Element(), original = new Element();
-  const chooseSelected = new Element(), chooseMax = new Element();
+  const chooseSelected = new Element(), chooseMax = new Element(), recover = new Element(), saved = new Element();
   chooseSelected.dataset.morphVariant = "selected";
   chooseMax.dataset.morphVariant = "max_vision";
   output.hidden = true;
   host.nodes.set(".morph-preview", [shell]);
   shell.nodes.set("[data-morph-create]", [create]);
+  shell.nodes.set("[data-morph-recover]", [recover]);
+  shell.nodes.set("[data-morph-saved]", [saved]);
   shell.nodes.set("[data-morph-variant]", [chooseSelected, chooseMax]);
   shell.nodes.set("[data-morph-status]", [new Element()]);
   shell.nodes.set("[data-morph-points]", [new Element()]);
@@ -83,10 +88,14 @@ function fixture(overrides: Parameters<typeof wireMorphPreview>[2] = {}) {
     consent: async () => true,
     photo: () => PIXEL,
     request: async () => ready,
+    list: async () => [],
+    recipeKey: async (blueprint) => (blueprint.variant === "selected" ? "a" : "b").repeat(64),
+    readMarker: () => null,
+    writeMarker: () => {},
     subscribeOwner: (callback) => { changed = callback; return () => { unsubscribed++; }; },
     ...overrides,
   });
-  return { shell, create, output, original, chooseSelected, chooseMax, dispose, expectedUsers,
+  return { shell, create, recover, saved, output, original, chooseSelected, chooseMax, dispose, expectedUsers,
     changeOwner: (next: string) => { owner = next; changed(); }, unsubscribed: () => unsubscribed };
 }
 
@@ -403,4 +412,121 @@ test("a held composite cannot start a render even through a programmatic click",
     assert.match(f.shell.querySelector("[data-morph-status]")!.textContent, /Review this fixed draft/);
     f.dispose();
   } finally { delete selected.renderHoldReason; }
+});
+
+const savedJob = (jobId = ready.jobId): SavedMorphPreview => ({ jobId, status: "ready", createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString() });
+
+test("a reloaded report discovers and selects an exact saved job without another POST", async () => {
+  let lists = 0, polls = 0;
+  const second = "preview_secondjob";
+  const f = fixture({ list: async (match) => { lists++; assert.equal(match.recipeKey, "a".repeat(64)); return [savedJob(), savedJob(second)]; },
+    request: async () => { assert.fail("recovery cannot buy another render"); },
+    poll: async (id, _side, _token, _signal, _fetcher, match) => { polls++; assert.equal(id, second); assert.equal(match?.recipeKey, "a".repeat(64)); return { ...ready, jobId: second }; },
+  });
+  await f.recover.click();
+  assert.equal(lists, 1);
+  assert.equal(polls, 0, "listing is metadata-only");
+  assert.equal(f.saved.hidden, false);
+  f.saved.value = second;
+  f.saved.onchange!();
+  await f.create.click();
+  assert.equal(polls, 1);
+  assert.equal(f.output.hidden, false);
+  f.dispose();
+});
+
+test("an unknown POST survives reload as check-only until its exact job is found", async () => {
+  let marker: MorphRequestMarker | null = null;
+  let requests = 0, available = false;
+  const overrides: Parameters<typeof wireMorphPreview>[2] = {
+    readMarker: () => marker, writeMarker: (_owner, _match, next) => { marker = next; },
+    list: async (match) => { if (marker) assert.equal(match.requestId, marker.requestId); return available ? [savedJob()] : []; },
+    request: async (request) => { requests++; assert.equal(request.requestId, marker?.requestId); throw new Error("Network interrupted"); },
+    poll: async () => ready,
+  };
+  const first = fixture(overrides);
+  await first.create.click();
+  assert.equal(requests, 1);
+  assert.ok(marker);
+  first.dispose();
+  const reload = fixture(overrides);
+  await reload.recover.click();
+  await reload.create.click();
+  assert.equal(requests, 1);
+  assert.match(reload.shell.querySelector("[data-morph-status]")!.textContent, /contact support/);
+  available = true;
+  await reload.create.click();
+  assert.equal(requests, 1);
+  assert.equal(marker, null);
+  assert.equal(reload.output.hidden, false);
+  reload.dispose();
+});
+
+test("a recovered terminal request clears its marker only after the matching job check", async () => {
+  let marker: MorphRequestMarker | null = { startedAt: 1, requestId: "33333333-3333-4333-8333-333333333333" };
+  let posts = 0;
+  const f = fixture({ readMarker: () => marker, writeMarker: (_owner, _match, next) => { marker = next; },
+    list: async (match) => match.requestId ? [{ ...savedJob(), status: "failed" }] : [],
+    poll: async () => ({ status: "failed", jobId: ready.jobId, error: "This preview expired." }),
+    request: async () => { posts++; return ready; },
+  });
+  await f.recover.click();
+  assert.ok(marker, "metadata discovery is not a terminal job check");
+  await f.create.click();
+  assert.equal(marker, null);
+  assert.equal(posts, 0);
+  assert.equal(f.output.hidden, true);
+  await f.create.click();
+  assert.equal(posts, 1, "only a later deliberate action creates work");
+  f.dispose();
+});
+
+test("preflight lookup failure cannot start a render, and concurrent check/create clicks share one operation", async () => {
+  const work = deferred<SavedMorphPreview[]>();
+  let lists = 0;
+  const f = fixture({ list: async () => { lists++; return work.promise; }, request: async () => { assert.fail("lookup must finish first"); } });
+  const checking = f.recover.click();
+  await flush();
+  await f.recover.click();
+  await f.create.click();
+  assert.equal(lists, 1);
+  f.changeOwner("user:member-b");
+  work.resolve([savedJob()]);
+  await checking;
+  assert.equal(f.saved.hidden, true);
+  assert.equal(f.saved.innerHTML, "");
+  assert.equal(f.output.src, "");
+  const failing = fixture({ list: async () => { throw new Error("Lookup unavailable"); }, request: async () => { assert.fail("an unavailable lookup must not permit POST"); } });
+  await failing.create.click();
+  assert.match(failing.shell.querySelector("[data-morph-status]")!.textContent, /Lookup unavailable/);
+  failing.dispose();
+});
+
+test("same-account auth refresh preserves recovery and passes the raw id to token checks", async () => {
+  const work = deferred<SavedMorphPreview[]>();
+  const f = fixture({ list: () => work.promise });
+  const checking = f.recover.click();
+  await flush();
+  f.changeOwner("user:member-a");
+  work.resolve([savedJob()]);
+  await checking;
+  assert.equal(f.saved.hidden, false);
+  assert.equal(f.unsubscribed(), 0);
+  assert.deepEqual(f.expectedUsers, ["member-a"]);
+  f.dispose();
+});
+
+test("rechecking a previously visible preview withholds it if it has since expired or been deleted", async () => {
+  for (const outcome of ["expired", "deleted"]) {
+    const f = fixture({ poll: async () => {
+      if (outcome === "deleted") throw new Error("Not found");
+      return { status: "failed", jobId: ready.jobId, error: "This preview expired." };
+    } });
+    await f.create.click();
+    assert.equal(f.output.hidden, false);
+    await f.create.click();
+    assert.equal(f.output.hidden, true);
+    assert.equal(f.output.src, "");
+    f.dispose();
+  }
 });

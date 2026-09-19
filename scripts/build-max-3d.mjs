@@ -16,7 +16,7 @@ export const MAX_CLIPS = ["idle", "listening", "thinking", "speaking", "celebrat
 export function buildMax3D() {
   const root = new THREE.Group();
   root.name = "MaxRoot";
-  root.userData = { asset: "TrueMax original SVG-faithful character", version: 3, rig: "rigid transform hierarchy", units: "metres", forward: "+Z", up: "+Y", identitySource: "src/ui/maxCharacter.ts" };
+  root.userData = { asset: "TrueMax original SVG-faithful character", version: 4, rig: "rigid transform hierarchy", units: "metres", forward: "+Z", up: "+Y", identitySource: "src/ui/maxCharacter.ts" };
   const body = new THREE.Group(); body.name = "Body"; root.add(body);
   // The approved drawing is the identity, including its matte blue gradient.
   // Vertex colors keep that palette under every scene light. This is real
@@ -197,10 +197,28 @@ export function buildMax3D() {
   const mirrorBack = mesh("MirrorBack", solid(new THREE.CylinderGeometry(0.275, 0.275, 0.06, 32), 0x18335b), palette, mirror); mirrorBack.rotation.x = Math.PI / 2; mirrorBack.position.set(0, 0.58, -0.035);
   const reflection = mesh("MirrorGlint", solid(new THREE.BoxGeometry(0.065, 0.32, 0.012), 0xffffff), palette, mirror); reflection.position.set(-0.06, 0.58, 0.02); reflection.rotation.z = -0.45;
   const skate = prop("SkateProp");
-  const board = mesh("SkateDeck", solid(new THREE.BoxGeometry(1.48, 0.1, 0.55), 0x4bf5c5), palette, skate);
-  const grip = mesh("SkateGrip", solid(new THREE.BoxGeometry(1.27, 0.025, 0.45), 0x18335b), palette, skate); grip.position.y = 0.0625;
-  for (const x of [-0.48, 0.48]) for (const z of [-0.27, 0.27]) {
-    const wheel = mesh(`SkateWheel${x < 0 ? "Left" : "Right"}${z < 0 ? "Back" : "Front"}`, solid(new THREE.CylinderGeometry(0.11, 0.11, 0.085, 16), 0xe9f6ff), palette, skate); wheel.rotation.x = Math.PI / 2; wheel.position.set(x, -0.14, z);
+  // Independent of Body so Max can jump above the board while it flips.
+  root.add(skate);
+  const kickTail = (geometry) => {
+    const positions = geometry.getAttribute("position");
+    for (let i = 0; i < positions.count; i++) {
+      const end = THREE.MathUtils.clamp((Math.abs(positions.getX(i)) - 0.55) / 0.28, 0, 1);
+      positions.setY(i, positions.getY(i) + 0.12 * end * end);
+    }
+    geometry.computeVertexNormals();
+    return geometry;
+  };
+  const deckGeometry = new THREE.ExtrudeGeometry(roundedShape(1.64, 0.58, 0.27), { depth: 0.07, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012, bevelSegments: 1, curveSegments: 8 });
+  deckGeometry.rotateX(-Math.PI / 2); deckGeometry.translate(0, -0.035, 0);
+  mesh("SkateDeck", solid(kickTail(deckGeometry), 0x4bf5c5), palette, skate);
+  const gripGeometry = new THREE.ShapeGeometry(roundedShape(1.46, 0.46, 0.22), 8);
+  gripGeometry.rotateX(-Math.PI / 2); gripGeometry.translate(0, 0.05, 0);
+  mesh("SkateGrip", solid(kickTail(gripGeometry), 0x18335b), palette, skate);
+  for (const x of [-0.5, 0.5]) {
+    const truck = mesh(`SkateTruck${x}`, solid(new THREE.BoxGeometry(0.14, 0.12, 0.48), 0xb5c3d3), palette, skate); truck.position.set(x, -0.105, 0);
+    for (const z of [-0.3, 0.3]) {
+      const wheel = mesh(`SkateWheel${x < 0 ? "Left" : "Right"}${z < 0 ? "Back" : "Front"}`, solid(new THREE.CylinderGeometry(0.125, 0.125, 0.1, 16), 0xe9f6ff), palette, skate); wheel.rotation.x = Math.PI / 2; wheel.position.set(x, -0.16, z);
+    }
   }
   const guitar = prop("GuitarProp");
   const guitarBody = mesh("GuitarBody", solid(new THREE.SphereGeometry(1, 24, 16), 0x6db3ee), palette, guitar); guitarBody.scale.set(0.33, 0.43, 0.1);
@@ -286,18 +304,43 @@ export function buildMax3D() {
       aim(state, "ArmLeft", [-1.08, -0.08, 0.73], [-0.64, -0.63, 1.0], ease);
       aim(state, "ArmRight", [1.08, -0.08, 0.73], [0.64, -0.63, 1.0], ease);
     } else if (name === "mirror") {
-      const grip = [1.15, -0.11 + Math.sin(t * Math.PI * 2) * 0.03, 1.03];
-      state.MirrorProp.position = grip; rotate("MirrorProp", [0, -1.05, -0.12]);
-      aim(state, "ArmRight", [0.85, -0.35, 0.83], grip, ease);
-      rotate("Body", [-ease * 0.05, ease * 0.28, -ease * 0.08]);
-      rotate("Eyes", [0, ease * 0.055, 0]);
+      const reach = smooth((t - 0.03) / 0.18) * (1 - smooth((t - 0.81) / 0.14));
+      const grip = new THREE.Vector3(1.12, -0.83, 0.82).lerp(new THREE.Vector3(0.62, -0.38, 1.78), reach).toArray();
+      // Hold it ahead of the visor, reflective face toward Max, not beside his ear.
+      state.MirrorProp.position = grip; rotate("MirrorProp", [0, -2.40, 0]);
+      aim(state, "ArmRight", [0.9, -0.35, 0.83], grip, ease);
+      rotate("Body", [-ease * 0.025, ease * 0.03, -ease * 0.045]);
+      rotate("Eyes", [0, ease * 0.075, 0]);
       rotate("ArmLeft", [ease * 0.16, 0, -ease * 0.3]);
-      offset("LeftBrowRig", [0, ease * periodic(t * 2) * 0.12, ease * 0.035]);
+      const wink = smooth(pulse(t, 0.53125, 0.065));
+      state.LeftEye.scale = [1, 1 - wink * 0.95, 1];
+      offset("LeftBrowRig", [0, -wink * 0.055, ease * 0.02]);
+      offset("RightBrowRig", [0, wink * 0.1, ease * 0.02]);
+      state.MouthSmile.scale = [1 + wink * 0.12, 1, 1];
     } else if (name === "skate") {
-      state.SkateProp.position = [0, -1.64, 0];
-      offset("MaxRoot", [Math.sin(t * Math.PI * 2) * ease * 0.17, periodic(t * 2) * ease * 0.12, 0]);
-      rotate("Body", [0, wave * ease * 0.32, Math.sin(t * Math.PI * 4) * ease * 0.09]);
-      rotate("ArmLeft", [0, 0, -ease * 1.1]); rotate("ArmRight", [0, 0, ease * 1.1]);
+      // Reveal the rounded deck, trucks and wheels for a beat before riding.
+      const reveal = smooth((t - 0.04) / 0.11);
+      const drop = smooth((t - 0.25) / 0.13);
+      const airborne = THREE.MathUtils.clamp((t - 0.46) / 0.25, 0, 1);
+      const hop = Math.sin(Math.PI * airborne);
+      const crouch = smooth(pulse(t, 0.43, 0.065));
+      const landing = smooth(pulse(t, 0.735, 0.05));
+      const held = new THREE.Vector3(0.06, -0.73, 1.43);
+      const boardPosition = new THREE.Vector3(0.58, -0.91, 0.7).lerp(held, reveal).lerp(new THREE.Vector3(0, -1.70 + hop * 0.16, 0.13), drop);
+      const boardRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(-1.12 * reveal, -0.12 * reveal, -0.18 * reveal));
+      boardRotation.slerp(new THREE.Quaternion(), drop);
+      boardRotation.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), smooth(airborne) * Math.PI * 2));
+      state.SkateProp.position = boardPosition.toArray(); state.SkateProp.quaternion = boardRotation.toArray();
+      const bodyY = hop * 0.32 - crouch * 0.07 - landing * 0.06;
+      offset("Body", [0, bodyY, 0]);
+      state.Body.scale = [1 + (crouch + landing) * 0.035, 1 - (crouch + landing) * 0.045, 1];
+      rotate("Body", [0, 0, Math.sin(t * Math.PI * 4) * ease * 0.055 * drop]);
+      rotate("ArmLeft", [ease * 0.12, 0, -ease * (0.65 + hop * 0.65)]);
+      rotate("ArmRight", [0, 0, ease * (0.65 + hop * 0.65)]);
+      if (drop < 1) {
+        const contact = new THREE.Vector3(0.7, 0, 0).applyQuaternion(boardRotation).add(boardPosition);
+        aim(state, "ArmRight", [0.91, -0.35, 0.8], contact.toArray(), ease * (1 - drop));
+      }
     } else if (name === "guitar") {
       const guitarPosition = new THREE.Vector3(-0.08, -0.75, 1.23), guitarRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -0.58));
       state.GuitarProp.position = guitarPosition.toArray(); state.GuitarProp.quaternion = guitarRotation.toArray();
@@ -341,7 +384,7 @@ export async function generateMaxAsset() {
   const directory = resolve(dirname(fileURLToPath(import.meta.url)), "../public/brand");
   await mkdir(directory, { recursive: true });
   await writeFile(resolve(directory, "max-rig-v1.glb"), new Uint8Array(binary));
-  const manifest = { version: 3, source: "scripts/build-max-3d.mjs", identitySource: "src/ui/maxCharacter.ts", identity: "Round original oval Max with pupil-less light bars, inset visor, navy flippers and expressive prop routines", rig: "rigid transform hierarchy", triangles, materials, bytes: binary.byteLength, clips: MAX_CLIPS, license: "Original TrueMax project asset. No third-party source meshes or textures.", approved: false };
+  const manifest = { version: 4, source: "scripts/build-max-3d.mjs", identitySource: "src/ui/maxCharacter.ts", identity: "Round original oval Max with pupil-less light bars, inset visor, navy flippers and expressive prop routines", rig: "rigid transform hierarchy", triangles, materials, bytes: binary.byteLength, clips: MAX_CLIPS, license: "Original TrueMax project asset. No third-party source meshes or textures.", approved: false };
   await writeFile(resolve(directory, "max-rig-v1.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify(manifest));
 }

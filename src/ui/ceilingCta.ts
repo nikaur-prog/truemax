@@ -1,27 +1,8 @@
 import { aggregateScoreToPercentile } from "../engine/scoring.js";
 import { rankShort } from "./templates.js";
 
-// ---------------------------------------------------------------------------
-// The ceiling, as something worth reaching for.
-//
-// The number was already on the paywall card and it was doing nothing, because
-// "your potential is 7.4" is a sentence, and a sentence next to a blurred wall
-// of text is not a reason to get a card out. The number needs a picture.
-//
-// What it does NOT get is a fabricated one. Every looksmaxxing app in this
-// category will happily generate the face you could have, and it is the single
-// most dishonest thing in the category: it is a rendering, it is not derived
-// from any measurement, and the person is being sold a photograph of somebody
-// who does not exist. TrueMax's entire pitch is that it shows the actual maths.
-// One fake after-photo and there is nothing left to defend.
-//
-// So the second image is THEIR OWN PHOTOGRAPH, out of focus, and the caption
-// says so in as many words. That is not a compromise, it is the better image:
-// the blur reads as the part that is not decided yet, which is exactly what a
-// ceiling is. The two numbers underneath are real, computed by the engine from
-// the fixable metrics alone, and they are what the person is actually buying
-// the route to.
-// ---------------------------------------------------------------------------
+// Reuse the person's unchanged photo beside a modelled score scenario.
+// Neither the second photo nor the recomputed score is an outcome forecast.
 
 export interface CeilingInput {
   overall: number;
@@ -43,7 +24,7 @@ export function ceilingCtaMarkup({ overall, potential }: CeilingInput): string {
       <span class="ceil-arrow">→</span>
       <span class="ceil-n hi">${potential.toFixed(1)}</span>
     </div>
-    <p class="ceil-line">Our engine puts your ceiling <b>${gap.toFixed(1)} points higher</b>, in the ${pct} of the reference set. Every point of that gap is a metric that moves without surgery.</p>
+    <p class="ceil-line">This modelled scenario is <b>${gap.toFixed(1)} points higher</b>, in the ${pct} of the reference set. It is not a personal ceiling or a promise that your face or score will change.</p>
     <p class="ceil-hon">That second image is your own photo, out of focus. We do not generate a face you have not got.</p>
   </div>`;
 }
