@@ -170,6 +170,16 @@ body {
 /* The version chip yields first: it can shorten or, on a narrow screen, hide,
    but it must never be the reason the wordmark leaves the screen. */
 .topbar-right { min-width: 0; }
+.header-home-group { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.header-home-link { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 44px; min-height: 44px; padding: 10px; border: 0; border-radius: 12px; background: transparent; color: var(--mut); cursor: pointer; }
+.header-home-link svg { display: block; width: 20px; height: 20px; }
+.header-home-link[aria-busy="true"] { cursor: progress; opacity: .6; }
+.home-nav-notice { margin: 12px auto; max-width: 640px; padding: 12px 16px; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 14px; font-size: 13px; line-height: 1.5; }
+.home-nav-notice button { min-height: 44px; margin-left: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); color: var(--ink); cursor: pointer; font: inherit; }
+.header-home-link:hover { color: var(--ink); background: var(--soft); }
+.header-home-link:focus-visible, .header-home-group .wordmark:focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+.header-home-link[hidden] { display: none; }
+@media (max-width: 420px) { .header-home-group { gap: 6px; } .header-home-link { padding-inline: 7px; } }
 @media (max-width: 420px) { .topbar .tag { display: none; } }
 .wordmark b { color: var(--acc); font-weight: 500; }
 .wordmark.brand-guest,
@@ -867,6 +877,8 @@ body.funnel-open { overflow: hidden; }
     rgba(16, 18, 21, .78);
   backdrop-filter: blur(8px); animation: trial-fade .28s ease both;
 }
+.settings-overlay { z-index: 400; }
+body:has(.settings-overlay) > .toneask { z-index: 410; }
 @keyframes trial-fade { from { opacity: 0; } }
 .trial-shell {
   width: min(760px, 100%); max-height: min(900px, 92dvh); overflow: hidden;
@@ -1270,6 +1282,8 @@ button.pillar:active { transform: translateY(0); }
 /* Measurements are the primary reading at every width. Comparisons and
    explanations expand in place, never behind a horizontal swipe gesture. */
 .report-deck { display: grid; grid-template-columns: minmax(0, 1fr); overflow: visible; scroll-snap-type: none; }
+.deck.deck-measurements-only { grid-template-columns: minmax(0, 1fr); }
+.deck-measurements-only > .dcard { flex-basis: 100%; }
 .report-reading { border-top: 1px solid var(--line); margin-top: 12px; }
 .report-reading > summary, .report-comparisons > summary {
   min-height: 44px; display: flex; align-items: center; justify-content: space-between;
@@ -1858,6 +1872,18 @@ body.scan-confirm-open { overflow: hidden; }
   display: block; width: auto; height: auto; max-width: 100%;
   max-height: min(48dvh, 520px); margin: auto; object-fit: contain;
 }
+.scan-confirm-example {
+  margin: 16px 0 18px; padding: 12px; border-radius: 16px;
+  background: var(--bg); border: 1px solid var(--line);
+}
+.scan-confirm-example img {
+  display: block; width: 100%; height: clamp(150px, 28dvh, 240px);
+  object-fit: contain; border-radius: 10px;
+}
+.scan-confirm-example img[hidden] { display: none; }
+.scan-confirm-example figcaption {
+  margin-top: 8px; font: 500 11.5px/1.4 var(--sans); color: var(--mut);
+}
 .scan-confirm-copy {
   max-width: 42ch; margin: 0 auto 20px; color: var(--mut); font-size: 14px; line-height: 1.55;
 }
@@ -1952,9 +1978,55 @@ body.scan-confirm-open { overflow: hidden; }
    against: a second button here would be offering a choice we know the answer
    to. */
 .side-mode-actions.single { grid-template-columns: 1fr; }
-.side-exit-actions { display: grid; grid-template-columns: 1fr; gap: 8px; width: 100%; flex-basis: 100%; margin-top: 12px; }
-.side-exit-actions .btn { min-height: 44px; white-space: normal; line-height: 1.35; color: var(--ink); }
-.side-mode-card .side-exit-actions { border-top: 1px solid var(--line); padding-top: 12px; }
+/* Full-width utility groups must wrap below the main actions. In a nowrap
+   flex row they consumed the row and squeezed Confirm into a tall sliver. */
+body:not(.cam-takeover) #side-actions {
+  display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px;
+}
+body:not(.cam-takeover) #side-actions:not(.guided-row) > .btn {
+  flex: 1 1 160px; width: auto; min-width: 0; margin: 0;
+  min-height: 48px; padding: 13px 18px; line-height: 1.35;
+  white-space: normal; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+body:not(.cam-takeover) #side-actions > .btn svg { flex: 0 0 auto; }
+.side-review-actions, .side-review-tools {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  width: 100%; flex: 0 0 100%;
+}
+#side-actions .side-review-actions .btn {
+  width: 100%; min-width: 0; min-height: 48px; margin: 0; padding: 13px 16px;
+  white-space: normal; line-height: 1.35;
+}
+#side-actions .side-review-tools { gap: 8px; }
+#side-actions .side-review-tools > button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; min-width: 0; height: auto; min-height: 44px;
+  margin: 0; padding: 10px 12px; border: 1px solid transparent; border-radius: 12px;
+  background: transparent; color: var(--mut); font: 500 12.5px/1.35 var(--sans);
+  cursor: pointer; white-space: normal;
+}
+#side-actions .side-review-tools > button:hover {
+  background: var(--card); border-color: var(--line); color: var(--ink); transform: none;
+}
+#side-actions .side-review-tools > button[aria-pressed="true"] {
+  background: var(--acc); border-color: var(--acc); color: #fff;
+}
+#side-actions .side-review-tools svg { flex: 0 0 auto; }
+.side-exit-actions {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  width: 100%; flex: 0 0 100%; margin-top: 4px; padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.side-exit-actions > :only-child { grid-column: 1 / -1; }
+#side-actions .side-exit-actions .btn, .side-mode-card .side-exit-actions .btn {
+  width: 100%; margin: 0; min-width: 0; min-height: 46px; padding: 11px 12px;
+  white-space: normal; line-height: 1.35; font-size: 13px;
+  background: transparent; color: var(--mut); border: 1px solid var(--line);
+}
+.side-mode-card .side-exit-actions { margin-top: 18px; }
+@container (max-width: 380px) {
+  .side-review-actions { grid-template-columns: 1fr; }
+}
 .rangebar:has(.goal-target-marker) { margin-bottom: 22px; }
 .goal-target-marker { position: absolute; top: -4px; bottom: -4px; width: 3px; transform: translateX(-50%); background: #078569; box-shadow: 0 0 0 1px var(--card); border-radius: 2px; z-index: 2; }
 .goal-target-marker b { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); font: 600 9px/1.4 var(--sans); color: #087760; padding-top: 3px; }
@@ -1982,11 +2054,13 @@ body.scan-confirm-open { overflow: hidden; }
    competing with Confirm on the review screen. */
 
 .side-feedback-backdrop {
-  position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center;
-  padding: 20px; background: rgba(12, 13, 15, 0.62); backdrop-filter: blur(5px);
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center; overflow-y: auto;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  background: rgba(12, 13, 15, 0.62); backdrop-filter: blur(5px);
 }
 .side-feedback-dialog {
-  width: min(520px, 100%); background: var(--card); color: var(--ink);
+  width: min(520px, 100%); margin: auto; flex: 0 0 auto; background: var(--card); color: var(--ink);
   border: 1px solid var(--line); border-radius: 24px; padding: 30px;
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.28);
 }
@@ -1996,6 +2070,13 @@ body.scan-confirm-open { overflow: hidden; }
 }
 .side-feedback-dialog p { color: var(--mut); font-size: 14px; line-height: 1.6; margin: 0 0 14px; }
 .side-feedback-dialog .side-feedback-privacy { font-size: 12px; }
+.side-feedback-confirmation {
+  display: flex; align-items: flex-start; gap: 10px; margin: 18px 0 0;
+  padding: 14px; border: 1px solid var(--line); border-radius: 12px;
+  font: 500 13px/1.5 var(--sans); color: var(--ink); text-align: left; cursor: pointer;
+}
+.side-feedback-confirmation input { margin-top: 3px; width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--acc); }
+.side-feedback-actions .btn:disabled { opacity: .45; cursor: not-allowed; }
 .side-feedback-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 22px; }
 .side-feedback-thanks {
   display: block; font-family: var(--serif); font-size: 34px; color: var(--acc);
@@ -2202,11 +2283,19 @@ body.scan-confirm-open { overflow: hidden; }
 /* The moment the count-up lands. One soft settle from a hair oversized, once
    per face — the numeral equivalent of a stamp meeting paper. The animation
    re-arms because the class is removed at each face change. */
-.reel-caption b.landed { animation: reel-land .5s cubic-bezier(.2,.9,.3,1.2) 1; }
+.reel-caption b.landed { animation: reel-land .28s ease-out 1; }
 @keyframes reel-land {
-  from { transform: scale(1.06); text-shadow: 0 2px 26px rgba(143,243,224,.55); }
-  to { transform: scale(1); text-shadow: 0 2px 14px rgba(0,0,0,.55); }
+  from { transform: scale(1.025); }
+  to { transform: scale(1); }
 }
+.reel-controls { position: absolute; top: 5px; right: 5px; display: flex; gap: 2px; z-index: 2; }
+.reel-controls button { display: grid; place-items: center; width: 44px; height: 44px; padding: 10px; border: 0; border-radius: 14px; background: transparent; color: #fff; cursor: pointer; opacity: .75; transition: background .16s ease, opacity .16s ease; }
+.reel-controls button:hover, .reel-controls button:focus-visible { background: rgba(10,11,13,.62); opacity: 1; }
+.reel-controls button:focus-visible { outline: 2px solid #8ff3e0; outline-offset: 2px; }
+.reel-controls button:disabled { opacity: .45; cursor: default; }
+.reel-controls svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.reel-controls .reel-play-icon, .reel-controls [aria-pressed="true"] .reel-pause-icon { display: none; }
+.reel-controls [aria-pressed="true"] .reel-play-icon { display: block; }
 @media (prefers-reduced-motion: reduce) { .reel-caption b.landed { animation: none; } }
 .oval-frame.showing-reel { background: #101113; }
 
@@ -2236,7 +2325,7 @@ body.scan-confirm-open { overflow: hidden; }
    the live overlay just reads as stray geometry. */
 .oval-frame.live.tracking #outline-canvas { opacity: 0; }
 .oval-frame.live .oval-idle { display: block; }
-.oval-frame.live #reel-canvas, .oval-frame.live .reel-caption { display: none; }
+.oval-frame.live #reel-canvas, .oval-frame.live .reel-caption, .oval-frame.live .reel-controls { display: none; }
 
 .sub-note { display: block; margin-top: 10px; font-size: 12px; line-height: 1.55; color: var(--mut); opacity: 0.8; }
 
@@ -2888,6 +2977,21 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
   cursor: pointer;
 }
 .morph-create:disabled { cursor: default; opacity: .48; }
+.morph-create[data-morph-recover] { color: var(--morph-ink); background: transparent; border: 1px solid rgba(130, 235, 207, .35); }
+.morph-preview [data-morph-saved] {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid rgba(130, 235, 207, .35);
+  border-radius: 10px;
+  color: var(--morph-ink);
+  background: #10251f;
+  font: 500 12px var(--sans);
+}
+.morph-preview [data-morph-saved][hidden] { display: none; }
+.morph-preview [data-morph-saved]:focus-visible { outline: 2px solid #82ebcf; outline-offset: 3px; }
 .morph-create.working { color: transparent; background: linear-gradient(100deg, #4fcaa9, #a2f4de, #4fcaa9); background-size: 200% 100%; animation: morph-working 1.4s linear infinite; }
 @keyframes morph-working { to { background-position: -200% 0; } }
 .morph-status { margin: 9px 2px 0; color: var(--morph-muted); font-size: 9.5px; line-height: 1.45; }
@@ -3428,9 +3532,9 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
    --------------------------------------------------------------------------- */
 @media (min-width: 1100px) {
   .dash { display: flex; flex-direction: column; }
-  .dash-inner { max-width: 1080px; width: 100%; padding: 40px 40px 72px; order: 2; }
+  .dash-inner { max-width: 1080px; width: 100%; padding: 40px 40px 72px; order: 2; flex-shrink: 0; }
   .dash-bar {
-    position: sticky; top: 0; bottom: auto; order: 1;
+    position: sticky; top: 0; bottom: auto; order: 1; flex-shrink: 0;
     justify-content: flex-start; gap: 6px;
     padding: 10px max(40px, calc(50vw - 540px));
     border-top: 0; border-bottom: 1px solid var(--line);
@@ -3447,7 +3551,7 @@ body:has(#frame.scanning) .pane-photo .scorestrip { display: none; }
      centres itself instead of clinging to the top edge. */
   .dash-inner:has(.dash-hero.empty) {
     min-height: calc(100vh - 210px);
-    display: flex; flex-direction: column; justify-content: center;
+    display: flex; flex-direction: column; justify-content: safe center;
   }
 }
 .dash-bar-btn span { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.12em; }
@@ -7379,9 +7483,9 @@ body.is-member .journey { display: none; }
 .mdx-stage.swap { opacity: 0; }
 .mdx-zoom {
   position: relative;
-  transition: transform .55s cubic-bezier(0.3, 0, 0.15, 1);
+  transition: transform .24s cubic-bezier(0.3, 0, 0.15, 1);
 }
-@media (prefers-reduced-motion: reduce) { .mdx-zoom { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .mdx-zoom, .mdx-stage { transition: none; } }
 /* Both canvases fill the aspect-ratio box absolutely — replaced-element sizing
    never enters into it. */
 .mdx-zoom canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -7501,7 +7605,9 @@ body.mdx-open { overflow: hidden; }
 .mdx-overlay { overscroll-behavior: contain; }
 /* A card with no photograph to stage is still a card — the numbers never
    needed one, only the drawing did. */
-.mdx-stage.mdx-nostage { display: none; }
+.mdx-stage.mdx-nostage { height: auto; min-height: 180px; align-items: center; }
+.mdx-nostage .mdx-zoom { display: none; }
+.mdx-unavailable { color: rgba(255,255,255,.8); font-size: 14px; line-height: 1.6; padding: 28px 60px; text-align: center; }
 
 /* Who's getting scanned ------------------------------------------------------
    Same family as the population chooser: a full-screen ask with two big

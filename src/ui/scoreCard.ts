@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import type { RegionId, RegionScore, Report } from "../engine/types.js";
+import type { RegionId, Report } from "../engine/types.js";
 import { REGION_NAMES, aggregateScoreToPercentile } from "../engine/scoring.js";
 import { rankShort } from "./templates.js";
 
@@ -41,10 +41,6 @@ import { rankShort } from "./templates.js";
 const W = 1080;
 const H = 1920;
 
-// The four regions the card has room for. Chosen rather than computed: a card
-// showing all eight is a table, and a table is not a thing anybody screenshots.
-const TILE_COUNT = 4;
-
 // A comparison has to compare like with like. Picking each photograph's four
 // highest regions independently made a before card show one set of labels and
 // its after card show another, even though both came from the same workflow.
@@ -52,36 +48,24 @@ const TILE_COUNT = 4;
 // for the scores to stay readable on a phone.
 const FRONT_TILE_ORDER: RegionId[] = ["proportions", "eyes", "midface", "jaw"];
 const SIDE_TILE_ORDER: RegionId[] = ["jaw", "chin", "nose", "lips"];
-const TILE_FALLBACK_ORDER: RegionId[] = [
-  "proportions",
-  "eyes",
-  "midface",
-  "jaw",
-  "chin",
-  "nose",
-  "lips",
-  "symmetry",
-];
+
+export interface ScoreCardTileRegion {
+  region: RegionId;
+  /** An unavailable category keeps its slot without an invented score. */
+  score: number | null;
+}
 
 export function scoreCardTileRegions(
   report: Pick<Report, "metrics" | "regions">,
-): RegionScore[] {
+): ScoreCardTileRegion[] {
   const hasFront = report.metrics.some((metric) => metric.def.view === "front");
   const hasSide = report.metrics.some((metric) => metric.def.view === "side");
   const primaryOrder = hasSide && !hasFront ? SIDE_TILE_ORDER : FRONT_TILE_ORDER;
-  const byId = new Map(
-    report.regions
-      .filter((region) => Number.isFinite(region.score))
-      .map((region) => [region.region, region] as const),
-  );
-  const picked: RegionScore[] = [];
-  for (const id of [...primaryOrder, ...TILE_FALLBACK_ORDER]) {
-    const region = byId.get(id);
-    if (!region || picked.some((entry) => entry.region === id)) continue;
-    picked.push(region);
-    if (picked.length === TILE_COUNT) break;
-  }
-  return picked;
+  const byId = new Map(report.regions.map((region) => [region.region, region] as const));
+  return primaryOrder.map((region) => {
+    const score = byId.get(region)?.score;
+    return { region, score: typeof score === "number" && Number.isFinite(score) ? score : null };
+  });
 }
 
 export interface ScoreCardInput {
@@ -292,7 +276,6 @@ function drawTiles(
   width: number,
 ): void {
   const regions = scoreCardTileRegions(report);
-  if (!regions.length) return;
 
   const gap = 28;
   const cw = (width - gap) / 2;
@@ -316,6 +299,15 @@ function drawTiles(
     ctx.letterSpacing = "3px";
     ctx.fillStyle = "#808783";
     ctx.fillText((REGION_NAMES[region.region] ?? region.region).toUpperCase(), tx + 32, ty + 52);
+
+    if (region.score === null) {
+      ctx.font = '500 28px "Inter Variable", Inter, Arial, sans-serif';
+      ctx.letterSpacing = "0px";
+      ctx.fillText("Not measured", tx + 32, ty + 126);
+      // No empty score bar: absence of a measurement is not a zero result.
+      ctx.restore();
+      return;
+    }
 
     ctx.font = '300 66px "Fraunces Variable", Fraunces, Georgia, serif';
     ctx.letterSpacing = "-2px";

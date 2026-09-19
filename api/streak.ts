@@ -8,11 +8,12 @@ import {
 } from "../src/engine/dailyStreak.js";
 import type { StreakBalances, StreakReason, StreakState } from "../src/engine/dailyStreak.js";
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
+import { recordStreakFunnel } from "./_streakFunnel.js";
 
 // ---------------------------------------------------------------------------
 // The daily streak, for the account.
 //
-// GET   the row, today's reading, and the two balances.
+// GET   the row, today's reading, and the consistency balance.
 // POST  count a day. The client says which day it counted and why; the
 //       server accepts the day only within one day of its own UTC date and
 //       hands it to count_streak_day, which counts and pays in one
@@ -139,12 +140,7 @@ export async function POST(request: Request): Promise<Response> {
       // Counts, not people: the funnel learns that a day was counted and
       // that a run ended, nothing about whose. A counter that fails to
       // move never undoes a day that was counted.
-      try {
-        await admin.rpc("bump_funnel_event", { p_event: "streak-day-counted" });
-        if (result.ended) await admin.rpc("bump_funnel_event", { p_event: "streak-ended" });
-      } catch (error) {
-        console.error("streak funnel", safeMessage(error));
-      }
+      await recordStreakFunnel(admin, result.ended ? ["streak-day-counted", "streak-ended"] : ["streak-day-counted"]);
     }
 
     const snap = await snapshot(user.id, utcToday());
@@ -176,11 +172,7 @@ export async function PATCH(request: Request): Promise<Response> {
     // Counts, not people. The streak measures its own upside already; this is
     // the only signal that says whether it is being rejected, so it is worth
     // as much as the counted days are. A counter failing never fails the save.
-    try {
-      await getSupabaseAdmin().rpc("bump_funnel_event", { p_event: body.enabled ? "streak-enabled" : "streak-disabled" });
-    } catch (bumpError) {
-      console.error("streak switch funnel", safeMessage(bumpError));
-    }
+    await recordStreakFunnel(getSupabaseAdmin(), [body.enabled ? "streak-enabled" : "streak-disabled"]);
     return json(await snapshot(user.id, utcToday()));
   } catch (error) {
     console.error("streak patch", safeMessage(error));

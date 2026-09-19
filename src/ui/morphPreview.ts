@@ -2,11 +2,14 @@ import { currentAccessToken, onAuthChange } from "../engine/auth.js";
 import { activeScanOwner } from "../engine/scanScope.js";
 import {
   createMorphRenderRequest,
+  listMorphPreviews,
+  MorphPreviewCheckError,
   pollMorphRender,
   requestMorphRender,
   submitMorphValidation,
   type MorphRenderSource,
 } from "../engine/morphContract.js";
+import { blueprintRecoveryKey, readMorphRequestMarker, writeMorphRequestMarker, type SavedMorphPreview, type MorphRequestMarker } from "../engine/morphRecovery.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type {
   MorphBlueprint,
@@ -141,6 +144,8 @@ export function morphPreviewHTML(input: Pick<MorphPreviewInput, "selected" | "ma
     ${planPanel(input.selected)}
     ${planPanel(input.maxVision)}
     ${canCreate ? `<button type="button" class="morph-create" data-morph-create${input.selected.renderHoldReason ? " disabled" : ""}>Create my visual target</button>` : ""}
+    ${canCreate ? `<button type="button" class="morph-create" data-morph-recover>Check saved previews</button>
+      <select data-morph-saved aria-label="Saved previews matching this scan and plan" hidden></select>` : ""}
     <p class="morph-status" data-morph-status aria-live="polite">${
       input.selected.renderHoldReason ? esc(input.selected.renderHoldReason) : input.renderEnabled
         ? "The preview request instructs the service not to retain your source photos. A result appears only after every validation check passes."
@@ -182,6 +187,10 @@ interface MorphPreviewRuntime {
   consent: typeof ensureGoalPreviewConsent;
   request: typeof requestMorphRender;
   poll: typeof pollMorphRender;
+  list: typeof listMorphPreviews;
+  recipeKey: typeof blueprintRecoveryKey;
+  readMarker: typeof readMorphRequestMarker;
+  writeMarker: typeof writeMorphRequestMarker;
   submit: typeof submitMorphValidation;
   validate: typeof validateMorphImages;
   photo: typeof photoData;
@@ -197,6 +206,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
   const runtime: MorphPreviewRuntime = {
     owner: activeScanOwner, token: currentAccessToken, consent: ensureGoalPreviewConsent,
     request: requestMorphRender, poll: pollMorphRender, submit: submitMorphValidation,
+    list: listMorphPreviews, recipeKey: blueprintRecoveryKey, readMarker: readMorphRequestMarker, writeMarker: writeMorphRequestMarker,
     validate: validateMorphImages, photo: photoData, wait: delay,
     subscribeOwner: (changed) => onAuthChange(() => changed()),
     renderBudgetMs: 300_000,
@@ -211,6 +221,8 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
   };
   const outputs: Partial<Record<MorphBlueprint["variant"], MorphRenderSource>> = {};
   const pendingJobs: Partial<Record<MorphBlueprint["variant"], string>> = {};
+  const uncertainRequests: Partial<Record<MorphBlueprint["variant"], MorphRequestMarker>> = {};
+  const savedJobs: Partial<Record<MorphBlueprint["variant"], SavedMorphPreview[]>> = {};
   const controller = new AbortController();
   let disposed = false;
   let busy = false;
@@ -234,6 +246,8 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
 
   const status = shell.querySelector<HTMLElement>("[data-morph-status]");
   const create = shell.querySelector<HTMLButtonElement>("[data-morph-create]");
+  const recover = shell.querySelector<HTMLButtonElement>("[data-morph-recover]");
+  const saved = shell.querySelector<HTMLSelectElement>("[data-morph-saved]");
 
   const dispose = (): void => {
     if (disposed) return;
@@ -245,11 +259,29 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
     delete outputs.max_vision;
     delete pendingJobs.selected;
     delete pendingJobs.max_vision;
+    if (saved) { saved.onchange = null; saved.innerHTML = ""; saved.hidden = true; }
     for (const image of shell.querySelectorAll<HTMLImageElement>("[data-morph-current], [data-morph-output]")) image.removeAttribute("src");
-    for (const button of shell.querySelectorAll<HTMLButtonElement>("[data-morph-variant], [data-morph-view-button], [data-morph-create]")) {
+    for (const button of shell.querySelectorAll<HTMLButtonElement>("[data-morph-variant], [data-morph-view-button], [data-morph-create], [data-morph-recover]")) {
       button.onclick = null;
       button.disabled = true;
     }
+  };
+
+  const showSavedJobs = (): void => {
+    if (!saved) return;
+    const jobs = savedJobs[variant] ?? [];
+    saved.hidden = !jobs.length;
+    saved.innerHTML = jobs.map((job) => `<option value="${esc(job.jobId)}">${esc(new Date(job.createdAt).toLocaleString())}: ${job.status === "ready" ? "ready to check" : job.status === "failed" ? "unavailable: check status" : "processing"}</option>`).join("");
+    saved.value = pendingJobs[variant] ?? jobs[0]?.jobId ?? "";
+  };
+  const refreshActions = (): void => {
+    const disabled = busy || !userId || blueprints[variant].goals.length === 0 || Boolean(blueprints[variant].renderHoldReason);
+    if (create) {
+      create.disabled = disabled;
+      create.textContent = pendingJobs[variant] || uncertainRequests[variant] ? "Check existing preview" : "Create my visual target";
+    }
+    if (recover) recover.disabled = disabled;
+    if (saved) saved.disabled = disabled;
   };
   const current = (): boolean => {
     if (!disposed && shell.isConnected && runtime.owner() === owner) return true;
@@ -286,14 +318,57 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
     }
     const points = shell.querySelector<HTMLElement>("[data-morph-points]");
     if (points) points.textContent = "Illustrative preview";
-    if (create) {
-      create.disabled = busy || !userId || blueprints[next].goals.length === 0 || Boolean(blueprints[next].renderHoldReason);
-      create.textContent = pendingJobs[next] ? "Check existing preview" : "Create my visual target";
-    }
+    refreshActions();
+    showSavedJobs();
     if (status && !busy && input.renderEnabled) {
       status.textContent = blueprints[next].renderHoldReason || (outputs[next] ? "Preview checks passed." : "Create a visual target for this selection.");
     }
     showOutput();
+  };
+
+  if (saved) saved.onchange = () => {
+    if (!current() || busy || !savedJobs[variant]?.some((job) => job.jobId === saved.value)) return;
+    pendingJobs[variant] = saved.value;
+    delete outputs[variant];
+    showOutput();
+    refreshActions();
+    if (status) status.textContent = "Saved preview selected. Check existing preview loads this job without starting another render.";
+  };
+
+  if (recover) recover.onclick = async () => {
+    if (!current() || busy || !userId || !input.renderEnabled || !blueprints[variant].goals.length || blueprints[variant].renderHoldReason) return;
+    const recoveringVariant = variant;
+    const budget = previewDeadline(controller.signal, runtime.renderBudgetMs, "The saved-preview check took too long. No new render was started.");
+    busy = true;
+    delete outputs[recoveringVariant];
+    showOutput();
+    refreshActions();
+    if (status) status.textContent = "Checking saved previews for this scan and plan...";
+    try {
+      const recipeKey = await budget.run(() => runtime.recipeKey(blueprints[recoveringVariant]));
+      const baseMatch = { scanId: input.scanId, recipeKey };
+      uncertainRequests[recoveringVariant] ||= runtime.readMarker(owner!, baseMatch) ?? undefined;
+      const match = { ...baseMatch, requestId: uncertainRequests[recoveringVariant]?.requestId };
+      const token = await budget.run(() => runtime.token(userId));
+      if (!current()) return;
+      if (!token) throw new MorphPreviewCheckError("auth", "Sign in again to check your saved previews.");
+      const jobs = await budget.run((signal) => runtime.list(match, token, signal));
+      if (!current()) return;
+      savedJobs[recoveringVariant] = jobs;
+      if (jobs.length) pendingJobs[recoveringVariant] = jobs[0].jobId;
+      if (variant === recoveringVariant) showSavedJobs();
+      if (status) status.textContent = jobs.length
+        ? "Saved previews found. Choose one, then check the existing preview. No new render was started."
+        : uncertainRequests[recoveringVariant]
+          ? "The earlier request has no recoverable result yet. Check saved previews again shortly. If it stays missing, contact support to reconcile the request; no new render will start here."
+          : "No saved preview matches this scan and plan. No new render was started.";
+    } catch (error) {
+      if (current() && status) status.textContent = error instanceof Error ? error.message : "Saved previews could not be checked. No new render was started.";
+    } finally {
+      budget.dispose();
+      busy = false;
+      if (current()) refreshActions();
+    }
   };
 
   for (const button of shell.querySelectorAll<HTMLButtonElement>("[data-morph-variant]")) {
@@ -326,14 +401,16 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
       if (!blueprint.goals.length || blueprint.renderHoldReason) return;
       const renderSource = source;
       busy = true;
-      create.disabled = true;
+      delete outputs[renderVariant];
+      showOutput();
+      refreshActions();
       create.classList.add("working");
       if (status) status.textContent = blueprint.hasSide ? "Building your preview and checking both supplied views..." : "Building your preview and checking the supplied front view...";
       let budget: ReturnType<typeof previewDeadline> | undefined;
       try {
         let accessToken = await runtime.token(userId);
         if (!current()) return;
-        if (!accessToken) throw new Error("Sign in again to create this preview.");
+        if (!accessToken) throw new MorphPreviewCheckError("auth", "Sign in again to check or create your preview.");
         const consented = await runtime.consent({ userId, signal: controller.signal });
         if (!current()) return;
         if (!consented) {
@@ -347,11 +424,35 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
         budget = previewDeadline(controller.signal, runtime.renderBudgetMs, "The preview took too long and was withheld. Your plan is still here. Try again shortly.");
         accessToken = await budget.run(() => runtime.token(userId));
         if (!current()) return;
-        if (!accessToken) throw new Error("Sign in again to create this preview.");
+        if (!accessToken) throw new MorphPreviewCheckError("auth", "Sign in again to check or create your preview.");
+        const recipeKey = await budget.run(() => runtime.recipeKey(blueprint));
+        if (!current()) return;
+        const baseMatch = { scanId: input.scanId, recipeKey };
+        uncertainRequests[renderVariant] ||= runtime.readMarker(owner!, baseMatch) ?? undefined;
+        const match = { ...baseMatch, requestId: uncertainRequests[renderVariant]?.requestId };
+        if (!pendingJobs[renderVariant]) {
+          if (status) status.textContent = "Checking for an existing preview before creating one...";
+          const jobs = await budget.run((signal) => runtime.list(match, accessToken!, signal));
+          if (!current()) return;
+          savedJobs[renderVariant] = jobs;
+          if (jobs.length) pendingJobs[renderVariant] = jobs[0].jobId;
+          if (variant === renderVariant) showSavedJobs();
+          if (!jobs.length && uncertainRequests[renderVariant]) {
+            if (status) status.textContent = "The earlier request has no recoverable result yet. Check saved previews again shortly. If it stays missing, contact support to reconcile the request; no new render will start here.";
+            return;
+          }
+        }
         const request = createMorphRenderRequest(input.scanId, blueprint, renderSource);
         const existingJob = pendingJobs[renderVariant];
+        if (!existingJob) {
+          const marker = { startedAt: Date.now(), requestId: crypto.randomUUID() };
+          uncertainRequests[renderVariant] = marker;
+          request.requestId = marker.requestId;
+          match.requestId = marker.requestId;
+          runtime.writeMarker(owner!, match, marker);
+        }
         let state = existingJob
-          ? await budget.run((signal) => runtime.poll(existingJob, blueprint.hasSide, accessToken!, signal))
+          ? await budget.run((signal) => runtime.poll(existingJob, blueprint.hasSide, accessToken!, signal, undefined, match))
           : await budget.run((signal) => runtime.request(request, accessToken!, signal));
         if (!current()) return;
         if (state.status !== "failed") pendingJobs[renderVariant] = state.jobId;
@@ -359,7 +460,7 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
           await budget.run((signal) => runtime.wait(2500, signal));
           if (!current()) return;
           const pendingId = state.jobId;
-          state = await budget.run((signal) => runtime.poll(pendingId, blueprint.hasSide, accessToken!, signal));
+          state = await budget.run((signal) => runtime.poll(pendingId, blueprint.hasSide, accessToken!, signal, undefined, match));
           if (!current()) return;
         }
         if (state.status === "validation_pending") {
@@ -378,14 +479,19 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
           if (!submitted.ok) throw new Error(submitted.error || "The validation result could not be recorded.");
           if (!validation.passed) {
             delete pendingJobs[renderVariant];
+            delete uncertainRequests[renderVariant];
+            runtime.writeMarker(owner!, match, null);
             if (status) status.textContent = validation.reason || "The generated face did not pass the identity and target checks, so it was withheld.";
             return;
           }
-          state = await budget.run((signal) => runtime.poll(pendingState.jobId, blueprint.hasSide, accessToken!, signal));
+          state = await budget.run((signal) => runtime.poll(pendingState.jobId, blueprint.hasSide, accessToken!, signal, undefined, match));
           if (!current()) return;
         }
         if (state.status === "ready") {
-          delete pendingJobs[renderVariant];
+          // Keep the selected ready job as the explicit check target in this report.
+          pendingJobs[renderVariant] = state.jobId;
+          delete uncertainRequests[renderVariant];
+          runtime.writeMarker(owner!, match, null);
           outputs[renderVariant] = state.images;
           showOutput();
           if (status) status.textContent = variant === renderVariant
@@ -393,6 +499,8 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
             : "Your other preview is ready. Switch back to view it.";
         } else if (state.status === "failed") {
           delete pendingJobs[renderVariant];
+          delete uncertainRequests[renderVariant];
+          runtime.writeMarker(owner!, match, null);
           if (status) status.textContent = state.error;
         } else if (status) {
           status.textContent = "The preview is still processing. Check the existing preview shortly; this does not start another render.";
@@ -400,15 +508,16 @@ export function wireMorphPreview(host: HTMLElement, input: MorphPreviewInput, ov
       } catch (error) {
         if (current() && status && (!(error instanceof DOMException) || error.name !== "AbortError")) {
           status.textContent = pendingJobs[renderVariant]
-            ? "The preview check was interrupted. Check the existing preview to resume without starting another render."
-            : error instanceof Error ? error.message : "The preview could not be created.";
+            ? `${error instanceof MorphPreviewCheckError ? error.message : "The preview check was interrupted."} Check existing preview resumes this job without starting another render.`
+            : uncertainRequests[renderVariant]
+              ? `${error instanceof Error ? error.message : "The request was interrupted."} Check existing preview looks for the earlier job without starting another render.`
+              : error instanceof Error ? error.message : "The preview could not be created.";
         }
       } finally {
         budget?.dispose();
         busy = false;
         if (current()) {
-          create.disabled = !userId || blueprints[variant].goals.length === 0 || Boolean(blueprints[variant].renderHoldReason);
-          create.textContent = pendingJobs[variant] ? "Check existing preview" : "Create my visual target";
+          refreshActions();
           create.classList.remove("working");
         }
       }

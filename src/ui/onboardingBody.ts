@@ -1,6 +1,6 @@
 import type { User } from "@supabase/supabase-js";
 import { currentAccessToken } from "../engine/auth.js";
-import { fetchBodyProfile, saveBodyProfile, type ServerBodyProfile } from "../engine/bodyProfile.js";
+import { fetchBodyProfile, migrateLocalBodyProfile, saveBodyProfile, type ServerBodyProfile } from "../engine/bodyProfile.js";
 import { bodyMetricUsable, boundsSentence, toMetric, type BodyEntry } from "../engine/bodyUnits.js";
 import { loadOnboardingProfile, profileIsAdult } from "../engine/onboarding.js";
 
@@ -8,12 +8,13 @@ export interface OnboardingBodyServices {
   loadProfile: typeof loadOnboardingProfile;
   token: typeof currentAccessToken;
   fetchBody: typeof fetchBodyProfile;
+  migrateBody: typeof migrateLocalBodyProfile;
   saveBody: typeof saveBodyProfile;
 }
 
 const services: OnboardingBodyServices = {
   loadProfile: loadOnboardingProfile, token: currentAccessToken,
-  fetchBody: fetchBodyProfile, saveBody: saveBodyProfile,
+  fetchBody: fetchBodyProfile, migrateBody: migrateLocalBodyProfile, saveBody: saveBodyProfile,
 };
 
 /** This optional screen never trusts the quiz's in-memory birthday or auth metadata. */
@@ -33,6 +34,10 @@ export async function loadOptionalOnboardingBody(
       if (!live() || !profile.completedAt || !profileIsAdult(profile)) return null;
       const token = await api.token(user.id);
       if (!token || !live()) return null;
+      // Hydrating an empty server row clears the device cache. Import any
+      // legacy measurements first, including when the quiz opened from a report.
+      await api.migrateBody(token);
+      if (!live()) return null;
       const body = await api.fetchBody(token);
       if (!live() || !body || bodyMetricUsable({ heightCm: body.heightCm ?? undefined, weightKg: body.weightKg ?? undefined })) return null;
       return body;

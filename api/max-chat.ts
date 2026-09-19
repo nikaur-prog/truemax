@@ -10,6 +10,7 @@ import {
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 import { maxAccessForUser } from "./_maxAccess.js";
 import { conversationTitle, parsePlanMemoryCommand } from "./_maxConversation.js";
+import { hydrateRoutineContext } from "./_maxRoutineSync.js";
 
 // ---------------------------------------------------------------------------
 // Talking to Max.
@@ -61,6 +62,7 @@ interface StoredMessageRow {
 interface PlanItemRow {
   title: string;
   status: string;
+  normalized_title: string;
 }
 
 
@@ -202,6 +204,7 @@ export async function POST(request: Request): Promise<Response> {
     });
     if (userInsert.error) throw new Error(`Max message could not be saved: ${userInsert.error.message}`);
 
+    await hydrateRoutineContext(context, admin, user.id, now);
     let planChange: "added" | "not_working" | null = null;
     const command = parsePlanMemoryCommand(latest);
     if (command?.kind === "add") {
@@ -261,8 +264,9 @@ export async function POST(request: Request): Promise<Response> {
         .limit(24),
       admin
         .from("max_plan_items")
-        .select("title,status")
+        .select("title,status,normalized_title")
         .eq("user_id", user.id)
+        .not("normalized_title", "like", "protocol:%")
         .in("status", ["active", "paused", "not_working"])
         .order("updated_at", { ascending: false })
         .limit(16),
@@ -272,11 +276,14 @@ export async function POST(request: Request): Promise<Response> {
     const stored = [...((messageResult.data ?? []) as StoredMessageRow[])].reverse();
     const history = sanitiseHistory(stored);
     for (const item of (planResult.data ?? []) as PlanItemRow[]) {
+      // Only server-backed chat notes enter this list. Tracked actions are
+      // represented by their separately hydrated routine state.
       const state = item.status === "not_working" ? "not working, needs an alternative" : item.status;
       context.activePlan.push(`${item.title}: ${state}`);
     }
     context.activePlan = [...new Set(context.activePlan)].slice(0, 16);
 
+    if (planChange && command) context.planNoteUpdate = { kind: planChange, title: command.title };
     const { shared, scoped } = buildSystemBlocks(context);
     const stream = client().messages.stream({
       model: process.env.MAX_CHAT_MODEL || DEFAULT_MODEL,

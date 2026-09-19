@@ -97,18 +97,8 @@ export function subline(ctx: GreetingCtx): string {
     return `This week is in. ${streak.weeks} weeks without missing one.`;
   }
 
-  // Otherwise alternate between what the product does and something worth
-  // reading. The quotes carry their attribution because an unattributed quote
-  // is a wall poster, and because half the famous ones are misattributed.
-  const own = [
-    "Measure your face, watch it over time, and see exactly where you land.",
-    "The number moves slowly. That is what makes a move worth reading.",
-    "Two photos of the same face differ by about 0.9 points, so watch the trend, not the reading.",
-    "Bone structure is the part you cannot change. Nearly everything else, you can.",
-    "Measured, not guessed. Every number here comes with the maths behind it.",
-    "Consistency beats intensity. One scan a week for a year beats seven this month.",
-  ];
-  if (visit % 2 === 0) return pick(own, 1);
+  // Original, practical styling notes. No borrowed celebrity endorsement,
+  // fixed repeat-photo error claim or promise that every feature can change.
   const q = pick(QUOTES, 3);
-  return `“${q.text}”, ${q.who}`;
+  return `${q.text} · ${q.who}`;
 }

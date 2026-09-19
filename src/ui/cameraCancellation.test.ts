@@ -3,6 +3,7 @@ import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { startCamera } from "./camera.js";
+import { bindNativeAppLifecycle } from "../engine/nativeBridge.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -109,6 +110,106 @@ function environment(t: TestContext) {
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+async function nativeActivity() {
+  let event!: (state: { isActive: boolean }) => void;
+  const dispose = bindNativeAppLifecycle({
+    addListener: async (_name, callback) => { event = callback; return { remove: async () => {} }; },
+    getState: async () => ({ isActive: true }),
+  });
+  await flush();
+  return { set: (isActive: boolean) => event({ isActive }), dispose };
+}
+
+test("native resume does not race an outstanding initial permission request", async (t) => {
+  const env = environment(t);
+  const activity = await nativeActivity();
+  const permission = deferred<MediaStream>();
+  env.requests.push(permission.promise);
+  const controller = new AbortController();
+  try {
+    const startup = startCamera(env.opts(controller.signal), env.engine);
+    activity.set(false);
+    activity.set(true);
+    assert.equal(env.requested, 1);
+    const camera = mediaStream();
+    permission.resolve(camera.stream);
+    const handle = await startup;
+    assert.equal(env.video.srcObject, camera.stream);
+    assert.equal(env.requested, 1);
+    handle.stop();
+  } finally { controller.abort(); activity.dispose(); }
+});
+
+test("a permission result received while native-paused is released and startup resumes once", async (t) => {
+  const env = environment(t);
+  const activity = await nativeActivity();
+  const permission = deferred<MediaStream>();
+  const resumed = mediaStream();
+  env.requests.push(permission.promise, Promise.resolve(resumed.stream));
+  const controller = new AbortController();
+  try {
+    const startup = startCamera(env.opts(controller.signal), env.engine);
+    activity.set(false);
+    const background = mediaStream();
+    permission.resolve(background.stream);
+    await flush();
+    assert.equal(background.track.stopped, 1);
+    assert.deepEqual(env.assignments, []);
+    assert.equal(env.requested, 1);
+    activity.set(true);
+    const handle = await startup;
+    assert.equal(env.requested, 2);
+    assert.equal(env.video.srcObject, resumed.stream);
+    handle.stop();
+  } finally { controller.abort(); activity.dispose(); }
+});
+
+test("native pause during video playback startup retries after resume without closing the camera", async (t) => {
+  const env = environment(t);
+  const activity = await nativeActivity();
+  const first = mediaStream();
+  const resumed = mediaStream();
+  const play = deferred<void>();
+  env.requests.push(Promise.resolve(first.stream), Promise.resolve(resumed.stream));
+  env.video.play = () => env.video.srcObject === first.stream ? play.promise : Promise.resolve();
+  const controller = new AbortController();
+  try {
+    const startup = startCamera(env.opts(controller.signal), env.engine);
+    await flush();
+    activity.set(false);
+    activity.set(true);
+    assert.equal(env.requested, 1);
+    play.reject(new Error("Playback interrupted by backgrounding"));
+    const handle = await startup;
+    assert.equal(env.video.srcObject, resumed.stream);
+    assert.equal(env.callbacks.lost, 0);
+    handle.stop();
+  } finally { controller.abort(); activity.dispose(); }
+});
+
+test("native pause stops preview, capture and swap until resume without needing document visibility", async (t) => {
+  const env = environment(t);
+  const activity = await nativeActivity();
+  const camera = mediaStream();
+  env.requests.push(Promise.resolve(camera.stream));
+  const handle = await startCamera(env.opts(), env.engine);
+  try {
+    activity.set(false);
+    assert.equal(env.doc.visibilityState, "visible");
+    assert.equal(env.pendingFrames.size, 0);
+    assert.equal(handle.capture(), null);
+    assert.equal(await handle.swap(), false);
+    assert.equal(env.requested, 1);
+    activity.set(true);
+    assert.equal(env.pendingFrames.size, 1);
+    assert.ok(handle.capture());
+    handle.stop();
+    const paused = env.callbacks.paused;
+    activity.set(false);
+    assert.equal(env.callbacks.paused, paused, "stopped camera unsubscribes from native activity");
+  } finally { handle.stop(); activity.dispose(); }
+});
 
 test("already cancelled camera never requests hardware", async (t) => {
   const env = environment(t);

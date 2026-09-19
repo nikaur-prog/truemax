@@ -1,4 +1,4 @@
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { FACE_CONNECTIONS } from "../engine/faceConnections.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { RegionId, ScoredMetric } from "../engine/types.js";
 import type { RundownTimeline, TimedBeat } from "../engine/rundownTimeline.js";
@@ -760,7 +760,7 @@ function ovalRing(
   H: number,
 ): Array<[number, number]> {
   const idx = new Set<number>();
-  for (const edge of FaceLandmarker.FACE_LANDMARKS_FACE_OVAL) {
+  for (const edge of FACE_CONNECTIONS.FACE_LANDMARKS_FACE_OVAL) {
     idx.add(edge.start);
     idx.add(edge.end);
   }

@@ -677,6 +677,7 @@ tr[data-dir="flat"] .q-cmp-delta { color: var(--muted, #6b716d); }
   background: var(--card); color: inherit; font-size: 16px;
 }
 #q-cal-num { width: 108px; font: 300 26px var(--serif); text-align: center; }
+#q-cal-reference { flex: 1 1 220px; min-width: 0; max-width: 100%; }
 #q-cal-label { flex: 1; min-width: 160px; }
 .q-cal-hint { margin: 14px 0 0; max-width: 520px; color: var(--mut); font-size: 12.5px; line-height: 1.6; }
 /* Provenance sits between the number and the reason, because it is a question

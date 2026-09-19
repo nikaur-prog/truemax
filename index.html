@@ -82,7 +82,10 @@
   </head>
   <body>
     <header class="topbar">
+      <div class="header-home-group">
       <button class="wordmark brand-guest" id="logo-home" type="button" title="Sign in to open your dashboard" aria-label="TrueMax dashboard unavailable while signed out" disabled>TRUE<b>MAX</b></button>
+      <button class="header-home-link" id="header-home" type="button" aria-label="Go to home dashboard" title="Dashboard" hidden disabled><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/></svg></button>
+      </div>
       <div class="topbar-right">
         <span class="tag">FRONT + SIDE · V1</span>
       </div>
@@ -116,10 +119,16 @@
           <canvas id="cam-guide"></canvas>
           <div class="oval-mask"></div>
           <div class="oval-idle" id="oval-idle">
-            <canvas id="reel-canvas"></canvas>
+            <canvas id="reel-canvas" role="img" aria-label="Example face scan showing measurement regions and a sample result"></canvas>
             <canvas id="outline-canvas"></canvas>
             <div class="reel-caption">
               <b id="reel-score"></b>
+            </div>
+            <div class="reel-controls" role="group" aria-label="Example scan controls">
+              <button id="reel-pause" type="button" aria-label="Pause demo" aria-pressed="false" title="Pause demo">
+                <svg class="reel-pause-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5v10M13 5v10"/></svg>
+                <svg class="reel-play-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 9 6-9 6Z"/></svg>
+              </button>
             </div>
           </div>
 
@@ -254,8 +263,8 @@
           <p>43 measurements, each against the reference range it was compared to. Where a measurement is too noisy to count, we say so instead of quietly scoring it.</p>
         </div>
         <div class="proof-item">
-          <b>Nothing that comes in a bottle</b>
-          <p>No surgery, no supplements, not ever. Only the things that actually move: body composition, grooming, sleep, posture, light.</p>
+          <b>Practical care, without extreme advice</b>
+          <p>No surgery or supplement advice. Build a routine around skin care, grooming, sleep and everyday habits. A photo is a starting point, not a diagnosis.</p>
         </div>
       </section>
 

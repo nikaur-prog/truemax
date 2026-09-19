@@ -145,6 +145,28 @@ test("a front-only scan says so rather than reporting a side of zero", () => {
   assert.match(text, /views: front only/);
 });
 
+test("a side-only report is never labelled front only", () => {
+  const m = metric("browTilt", 10, 5);
+  const side = { ...m, def: { ...m.def, view: "side" as const } };
+  assert.match(diagnosticsText(report({ metrics: [side] }), "Side"), /views: side only/);
+});
+
+test("diagnostics distinguish reference mean, model band and placement accuracy", () => {
+  const text = diagnosticsText(report(), "Sample");
+  assert.match(text, /value\s+reference\s+metric/);
+  assert.match(text, /population mean, not an ideal to reach/);
+  assert.match(text, /not confidence that these particular points are correctly placed/);
+  assert.match(text, /REFERENCE NOTES/);
+  assert.equal(text.split("\n").filter((line) => METRIC_ROW.test(line)).length, 3);
+});
+
+test("an unavailable hairline is not described as impossible anatomy", () => {
+  const missing = { ...metric("foreheadRatio", Number.NaN, 0), implausible: true };
+  const text = diagnosticsText(report({ metrics: [missing] }), "Sample");
+  assert.match(text, /not measured: required landmark or geometry unavailable/);
+  assert.doesNotMatch(text, /not a face|anatomically implausible/);
+});
+
 // The tool splits a multi-dump file on this heading. If it stops being the
 // first line of its own, several pasted scans merge into one and the
 // repeatability measurement quietly compares a face against itself.

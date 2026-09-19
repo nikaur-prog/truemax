@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { metricScoreLabel, stageViewFor, stepIndex } from "./metricDetail.js";
+import { constructionCaveat, metricScoreLabel, overviewHTML, stageViewFor, stepIndex } from "./metricDetail.js";
 import { sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { SIDE_METRICS, computeSideMetrics, faceDirFromPoints } from "../engine/sideMetrics.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import type { ScoredMetric } from "../engine/types.js";
+import { METRICS } from "../engine/metrics.js";
 
 // ---------------------------------------------------------------------------
 // The detail view's decisions, minus the DOM.
@@ -20,14 +21,16 @@ import type { ScoredMetric } from "../engine/types.js";
 const asMetric = (id: string, region = "jaw"): ScoredMetric =>
   ({ def: { id, region, decimals: 1, unit: "°" }, value: 100 }) as unknown as ScoredMetric;
 
-test("a side construction renders on the profile whenever the profile exists", () => {
+test("each construction needs its own photograph, never the opposite view", () => {
   const gonial = asMetric("gonialAngle");
   assert.equal(stageViewFor(gonial, true, true), "side");
-  // Without the profile it falls back to the front's region lighting, the
-  // same honest fallback the main pane uses, rather than rendering nothing.
-  assert.equal(stageViewFor(gonial, false, true), "front");
+  assert.equal(stageViewFor(gonial, false, true), null);
+  assert.equal(stageViewFor(gonial, true, false), "side");
+  assert.equal(stageViewFor(gonial, false, false), null);
   const fwhr = asMetric("fwhr", "midface");
   assert.equal(stageViewFor(fwhr, true, true), "front");
+  assert.equal(stageViewFor(fwhr, true, false), null);
+  assert.equal(stageViewFor(fwhr, false, true), "front");
   assert.equal(stageViewFor(fwhr, false, false), null);
 });
 
@@ -85,9 +88,34 @@ test("a metric with no recipe returns no bounds rather than a wrong box", () => 
 });
 
 test("measurement detail grades climb with the score", () => {
-  assert.equal(metricScoreLabel(8.1, "Eyebrow tilt"), "Excellent eyebrow tilt");
-  assert.equal(metricScoreLabel(6.4, "Jaw angle"), "Good jaw angle");
-  assert.equal(metricScoreLabel(5.0, "Midface ratio"), "Balanced midface ratio");
-  assert.equal(metricScoreLabel(3.8, "Chin projection"), "Below range chin projection");
-  assert.equal(metricScoreLabel(2.7, "Lower lip"), "Weak lower lip");
+  assert.equal(metricScoreLabel(8.1, "Eyebrow tilt"), "High model score for eyebrow tilt");
+  assert.equal(metricScoreLabel(6.4, "Jaw angle"), "Above-reference score for jaw angle");
+  assert.equal(metricScoreLabel(5.0, "Midface ratio"), "Mid-range model score for midface ratio");
+  assert.equal(metricScoreLabel(3.8, "Chin projection"), "Below-reference score for chin projection");
+  assert.equal(metricScoreLabel(2.7, "Lower lip"), "Below-reference score for lower lip");
+  assert.equal(metricScoreLabel(Number.NaN, "Missing"), "Not scored");
+});
+
+test("indicative detail does not pair a caution with a confident trait or percentile", () => {
+  const def = METRICS.find((d) => d.id === "nasalIndex")!;
+  const m = { def, value: def.dist.male.mean + 3 * def.dist.male.sd, percentile: 3, conformance: 0.1, idealRange: [0.7, 0.8] } as ScoredMetric;
+  const html = overviewHTML(m, "male");
+  assert.match(html, /Indicative only/);
+  assert.match(html, /no weight in the overall score/);
+  assert.doesNotMatch(html, /mdx-pos|On your face:/);
+});
+
+test("unavailable hairline detail does not invent an anatomical fault", () => {
+  const def = METRICS.find((d) => d.id === "foreheadRatio")!;
+  const html = overviewHTML({ def, value: Number.NaN, implausible: true, idealRange: [0.1, 0.2] } as ScoredMetric, "male");
+  assert.match(html, /required point or part of the geometry could not be read/);
+  assert.doesNotMatch(html, /misplaced point|outside the range a face occupies/);
+});
+
+test("gonial detail distinguishes the photographed surface angle from its unvalidated skeletal reference", () => {
+  const caveat = constructionCaveat("gonialAngle");
+  assert.ok(caveat);
+  assert.match(caveat, /photographic surface angle, not the skeletal gonial angle/);
+  assert.match(caveat, /has not been validated for these surface points/);
+  assert.match(caveat, /Point placement and head turn/);
 });

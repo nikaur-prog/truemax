@@ -1,5 +1,6 @@
-import { scopedStorageKey } from "./scanScope.js";
+import { activeScanOwner, scopedStorageKey } from "./scanScope.js";
 import type { AdviceChannel } from "./goals.js";
+import { queueRoutineSync, routineSnapshots } from "./routineSyncQueue.js";
 
 // ---------------------------------------------------------------------------
 // A protocol is a promise with a clock on it.
@@ -36,9 +37,9 @@ import type { AdviceChannel } from "./goals.js";
 //    is also the single most valuable thing anybody can tell this product,
 //    because a working routine and a good month are identical from the scan.
 //
-// Everything is local. A protocol is a note about what somebody said they
-// would do, kept in the same owner-scoped localStorage the scan history uses,
-// and it never leaves the device.
+// The full retained record lives in owner-scoped device storage. Coach syncs
+// the lifecycle and recent evidence to the account; the full device history
+// can be exported/imported explicitly as a private routine-only backup.
 // ---------------------------------------------------------------------------
 
 /** The soonest anything here may be called a failure, whatever it is. */
@@ -135,6 +136,8 @@ export interface Protocol {
    * stored before the tick existed.
    */
   ticks?: string[];
+  /** Restored coaching memory contains recent evidence, not the full tick history. */
+  historyPartial?: boolean;
   status: ProtocolStatus;
 }
 
@@ -270,11 +273,17 @@ export function readProtocols(): Protocol[] {
   }
 }
 
-export function writeProtocols(list: Protocol[]): void {
+export function writeProtocols(list: Protocol[], options: { sync?: boolean } = {}): void {
   const key = KEY();
   if (!key) return;
   try {
-    localStorage.setItem(key, JSON.stringify(list.slice(-40)));
+    // Do not evict completed/declined tombstones just to make an import fit.
+    if (list.length > 40) return;
+    const encoded = JSON.stringify(list);
+    const changed = localStorage.getItem(key) !== encoded;
+    if (changed) localStorage.setItem(key, encoded);
+    const owner = activeScanOwner();
+    if (changed && options.sync !== false && owner?.startsWith("user:")) queueRoutineSync(routineSnapshots(list), owner);
   } catch {
     /* storage full or disabled: the protocol is a convenience, not a record */
   }
@@ -304,7 +313,9 @@ export function tickedOn(p: Protocol, day: string): boolean {
 export function tickProtocol(p: Protocol, day: string): Protocol {
   if (p.status !== "running" || !TICK_DAY_RE.test(day) || tickedOn(p, day)) return p;
   const ticks = [...(p.ticks ?? []), day].sort();
-  return { ...p, ticks: ticks.slice(-400) };
+  // Keep imported older history instead of dropping it on the next daily tick.
+  // A hard retention bound is explicit rather than pretending the record is complete.
+  return { ...p, ticks: ticks.slice(-5_000), ...(ticks.length > 5_000 ? { historyPartial: true } : {}) };
 }
 
 export interface Adherence {
@@ -322,7 +333,7 @@ export interface Adherence {
  * the judge falls back to the check-in answers in that case.
  */
 export function adherenceFromTicks(p: Protocol, now: number): Adherence | null {
-  if (p.startedAt == null || !p.ticks?.length) return null;
+  if (p.historyPartial || p.startedAt == null || !p.ticks?.length) return null;
   const days = Math.max(1, Math.floor((now - p.startedAt) / DAY_MS) + 1);
   const ticked = p.ticks.length;
   return { days, ticked, fraction: Math.min(1, ticked / days) };

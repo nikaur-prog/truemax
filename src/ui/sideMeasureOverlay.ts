@@ -1,8 +1,10 @@
 import type { Pt } from "../engine/geometry.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import type { ScoredMetric } from "../engine/types.js";
-import { compositeDeparting, snapshotIfMatching } from "./measureOverlay.js";
+import { compositeDeparting, snapshotIfMatching, prefersReducedOverlayMotion } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
+import { startMeasurementInteraction } from "../engine/measurementPerformance.js";
+import { resetCanvasState } from "./interactiveRaster.js";
 
 // ---------------------------------------------------------------------------
 // Side-profile measurement overlays — the profile's answer to measureOverlay.
@@ -75,6 +77,26 @@ const RECIPES: Record<string, (p: SidePoints, m: ScoredMetric, span: number) => 
 
 export function hasSideOverlay(metricId: string): boolean {
   return metricId in RECIPES;
+}
+
+/** Main-report resting state; mouse-out needn't reallocate a full photo grid. */
+export function drawSideRestingPoints(canvas: HTMLCanvasElement, points: SidePoints, width: number, height: number): void {
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  const context = resetCanvasState(canvas);
+  if (!context) return;
+  context.clearRect(0, 0, width, height);
+  const radius = Math.max(3, width / 150);
+  for (const point of Object.values(points)) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    context.beginPath();
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    context.fillStyle = "rgba(255,255,255,0.9)";
+    context.fill();
+    context.lineWidth = Math.max(1, radius * .3);
+    context.strokeStyle = "rgba(10,20,17,0.7)";
+    context.stroke();
+  }
 }
 
 const DRAW_MS = 320;
@@ -181,20 +203,36 @@ export function animateSideMeasurement(
   h: number,
   metric: ScoredMetric,
 ): OverlayFade {
+  const interaction = startMeasurementInteraction("side");
+  if (prefersReducedOverlayMotion()) {
+    drawSideMeasurement(canvas, points, w, h, metric);
+    interaction.drawn();
+    interaction.finish("completed");
+    return { cancel() {} };
+  }
   // The departing figure dissolves under the arriving one — same reasoning and
   // same helpers as animateMeasurement in measureOverlay.ts.
   const from = snapshotIfMatching(canvas, w, h);
   let raf = 0;
-  let start = 0;
+  const start = performance.now();
+  let cancelled = false;
   const frame = (now: number) => {
-    if (!start) start = now;
-    const t = Math.min(1, (now - start) / DRAW_MS);
-    drawSideMeasurement(canvas, points, w, h, metric, t);
-    compositeDeparting(canvas, from, t);
+    if (cancelled) return;
+    const t = Math.max(0, Math.min(1, (now - start) / DRAW_MS));
+    try {
+      drawSideMeasurement(canvas, points, w, h, metric, t);
+      if (t > 0) interaction.drawn();
+      compositeDeparting(canvas, from, t);
+    } catch (error) { interaction.finish("error"); throw error; }
     if (t < 1) raf = requestAnimationFrame(frame);
+    else interaction.finish("completed");
   };
   raf = requestAnimationFrame(frame);
-  return { cancel: () => cancelAnimationFrame(raf) };
+  return { cancel: () => {
+    cancelled = true;
+    cancelAnimationFrame(raf);
+    interaction.finish("cancelled");
+  } };
 }
 
 /**

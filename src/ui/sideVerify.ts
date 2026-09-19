@@ -77,6 +77,8 @@ export interface SideSeed {
   // loudly when the seed is a guess and quietly when it is not, instead of
   // presenting every seed with the same false confidence.
   confidence: number;
+  /** The whole placement is a centred template, not a detected silhouette. */
+  templateFallback?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +221,31 @@ function centredSeed(w: number, h: number): { points: SidePoints; faceDir: numbe
   const frame = headFrame(points);
   if (frame) placeBackPoints(points, frame, headWidthFrom(headH * 0.7, frame.vlen));
   return { points, faceDir: 1 };
+}
+
+/** Editable starting positions only. This does not inspect or detect a face. */
+export function seedSideTemplate(width: number, height: number): SideSeed {
+  const seedWidth = Math.max(100, width);
+  const seedHeight = Math.max(100, height);
+  const seed = centredSeed(seedWidth, seedHeight);
+  for (const { id } of SIDE_POINTS) {
+    seed.points[id].x *= width / seedWidth;
+    seed.points[id].y *= height / seedHeight;
+  }
+  const points = keepSeedReachable(seed.points, width, height);
+  // Tiny but decodable images still open for review. Their points may be
+  // unsuitable for measurement, but must not be placed outside the canvas.
+  for (const { id } of SIDE_POINTS) {
+    points[id].x = Math.max(0, Math.min(width, points[id].x));
+    points[id].y = Math.max(0, Math.min(height, points[id].y));
+  }
+  return {
+    ...seed,
+    points,
+    method: "silhouette",
+    confidence: 0,
+    templateFallback: true,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -780,7 +807,8 @@ export function seedSidePoints(
     points: keepSeedReachable(cleaned.points, canvas.width, canvas.height),
     faceDir: cleaned.faceDir,
     method: useMesh ? "mesh" : "silhouette",
-    confidence: Math.max(0, useMesh ? meshScore : silhouetteScore),
+    confidence: !useMesh && silhouette.templateFallback ? 0 : Math.max(0, useMesh ? meshScore : silhouetteScore),
+    templateFallback: !useMesh && silhouette.templateFallback === true,
   };
 }
 
@@ -1163,11 +1191,11 @@ export function onHeadFraction(points: SidePoints, canvas: HTMLCanvasElement): n
 // them into place.
 export function seedFromSilhouette(
   canvas: HTMLCanvasElement,
-): { points: SidePoints; faceDir: number } {
+): { points: SidePoints; faceDir: number; templateFallback?: boolean } {
   const w = canvas.width;
   const h = canvas.height;
   const g = silhouetteGeometry(canvas);
-  if (!g) return centredSeed(w, h);
+  if (!g) return { ...centredSeed(w, h), templateFallback: true };
   const { mask: m, top, headH, faceDir, rowSpan } = g;
 
   // The background model assumes the top corners of the frame ARE background,

@@ -1,4 +1,6 @@
 import type { MorphBlueprint } from "./morphPlan.js";
+import type { MorphRecoveryMatch, SavedMorphPreview } from "./morphRecovery.js";
+import { isScanId } from "./scanSession.js";
 
 export interface MorphRenderSource {
   front: string;
@@ -9,6 +11,8 @@ export interface MorphRenderRequest {
   version: 1;
   scanId: string;
   variant: MorphBlueprint["variant"];
+  /** Correlates an interrupted POST, not an idempotency guarantee. */
+  requestId?: string;
   source: MorphRenderSource;
   blueprint: MorphBlueprint;
   privacy: {
@@ -39,6 +43,14 @@ export type MorphRenderState =
       validation: MorphRenderValidation;
     }
   | { status: "failed"; jobId?: string; error: string };
+
+/** A failed check is not evidence that the stored render itself has failed. */
+export class MorphPreviewCheckError extends Error {
+  constructor(readonly reason: "auth" | "access" | "transport" | "protocol", message: string) {
+    super(message);
+    this.name = "MorphPreviewCheckError";
+  }
+}
 
 const MAX_IMAGE_CHARS = 16_000_000;
 const SAFE_IMAGE = /^data:image\/(?:jpeg|webp);base64,[a-z0-9+/=]+$/i;
@@ -99,11 +111,11 @@ export function parseMorphRenderState(value: unknown, expectSide: boolean): Morp
       : { status: "failed", error: "The preview service returned an invalid job." };
   }
 
-  if (value.status === "failed") {
+  if (value.status === "failed" || value.status === "cancelled") {
     const id = jobId(value.jobId) ?? undefined;
     const message = typeof value.error === "string" && value.error.trim()
       ? value.error.trim().slice(0, 240)
-      : "The preview could not be created.";
+      : value.status === "cancelled" ? "The preview was cancelled." : "The preview could not be created.";
     return { status: "failed", ...(id ? { jobId: id } : {}), error: message };
   }
 
@@ -218,9 +230,16 @@ export async function requestMorphRender(
     const message = isRecord(payload) && typeof payload.error === "string"
       ? payload.error.slice(0, 240)
       : "The preview service could not be reached.";
-    return { status: "failed", error: message };
+    if (isRecord(payload) && payload.requestRejected === true && !payload.jobId) return { status: "failed", error: message };
+    if (isRecord(payload) && payload.status === "failed" && jobId(payload.jobId)) return parseMorphRenderState(payload, request.blueprint.hasSide);
+    throw new MorphPreviewCheckError("transport", `${message} The request outcome is unknown.`);
   }
-  return parseMorphRenderState(payload, request.blueprint.hasSide);
+  const state = parseMorphRenderState(payload, request.blueprint.hasSide);
+  // A gateway/protocol failure is not proof that the server never created a job.
+  if (state.status === "failed" && (!state.jobId || !isRecord(payload) || (payload.status !== "failed" && payload.status !== "cancelled"))) {
+    throw new MorphPreviewCheckError("protocol", "The request returned an unexpected result. Check saved previews before trying again.");
+  }
+  return state;
 }
 
 export async function pollMorphRender(
@@ -229,19 +248,69 @@ export async function pollMorphRender(
   accessToken: string,
   signal?: AbortSignal,
   fetcher: typeof fetch = fetch,
+  match?: MorphRecoveryMatch,
 ): Promise<MorphRenderState> {
   const id = jobId(jobIdValue);
   if (!id) return { status: "failed", error: "The preview job was invalid." };
-  const response = await fetcher(`/api/morph-preview?job=${encodeURIComponent(id)}`, {
+  if (!accessToken.trim()) {
+    throw new MorphPreviewCheckError("auth", "Sign in again to check your existing preview.");
+  }
+  const query = new URLSearchParams({ job: id, ...(match ? { scan: match.scanId, recipe: match.recipeKey, ...(match.requestId ? { request: match.requestId } : {}) } : {}) });
+  const response = await fetcher(`/api/morph-preview?${query}`, {
     headers: { authorization: `Bearer ${accessToken}` },
     signal,
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const message = isRecord(payload) && typeof payload.error === "string"
-      ? payload.error.slice(0, 240)
-      : "The preview service could not be reached.";
-    return { status: "failed", jobId: id, error: message };
+    if (response.status === 401) {
+      throw new MorphPreviewCheckError("auth", "Sign in again to check your existing preview.");
+    }
+    if (response.status === 403 || response.status === 404 || response.status === 410) {
+      throw new MorphPreviewCheckError("access", "This preview cannot be opened right now. Check your account access before trying again.");
+    }
+    throw new MorphPreviewCheckError("transport", "The preview check was interrupted.");
   }
-  return parseMorphRenderState(payload, expectSide);
+  // Only the requested job can satisfy this check, including a terminal state.
+  // A malformed reply or gateway failure must not discard a paid render's ID.
+  if (!isRecord(payload) || jobId(payload.jobId) !== id) {
+    throw new MorphPreviewCheckError("protocol", "The preview check returned an unexpected response. The image was withheld.");
+  }
+  const state = parseMorphRenderState(payload, expectSide);
+  if (state.status === "failed" && payload.status !== "failed" && payload.status !== "cancelled") {
+    throw new MorphPreviewCheckError("protocol", "The preview check did not pass validation. The image was withheld.");
+  }
+  return state;
+}
+
+/** Metadata-only discovery. Matching and expiry are checked again before accepting any candidate. */
+export async function listMorphPreviews(
+  match: MorphRecoveryMatch,
+  accessToken: string,
+  signal?: AbortSignal,
+  fetcher: typeof fetch = fetch,
+): Promise<SavedMorphPreview[]> {
+  if (!accessToken.trim()) throw new MorphPreviewCheckError("auth", "Sign in again to check your saved previews.");
+  if (!isScanId(match.scanId) || !/^[a-f0-9]{64}$/.test(match.recipeKey) || (match.requestId !== undefined && !isScanId(match.requestId))) {
+    throw new MorphPreviewCheckError("protocol", "The preview selection could not be matched safely.");
+  }
+  const response = await fetcher(`/api/morph-preview?${new URLSearchParams({ scan: match.scanId, recipe: match.recipeKey, ...(match.requestId ? { request: match.requestId } : {}) })}`, {
+    headers: { authorization: `Bearer ${accessToken}` }, signal,
+  });
+  const payload = await response.json().catch(() => null);
+  if (response.status === 409) throw new MorphPreviewCheckError("access", "Too many saved previews match this scan to check safely. Manage older previews in Settings, then check again. No new render was started.");
+  if (!response.ok) throw new MorphPreviewCheckError(response.status === 401 ? "auth" : response.status === 403 || response.status === 402 ? "access" : "transport",
+    response.status === 401 ? "Sign in again to check your saved previews." : "Saved previews could not be checked. No new render was started.");
+  if (!isRecord(payload) || payload.scanId !== match.scanId || payload.recipeKey !== match.recipeKey || (match.requestId && payload.requestId !== match.requestId) || !Array.isArray(payload.jobs) || payload.jobs.length > 50) {
+    throw new MorphPreviewCheckError("protocol", "The saved-preview check returned an unexpected selection.");
+  }
+  const seen = new Set<string>();
+  return payload.jobs.map((row): SavedMorphPreview => {
+    if (!isRecord(row) || !jobId(row.jobId) || seen.has(String(row.jobId)) || (row.status !== "processing" && row.status !== "ready" && !(match.requestId && row.status === "failed"))
+      || typeof row.createdAt !== "string" || !Number.isFinite(Date.parse(row.createdAt))
+      || typeof row.expiresAt !== "string" || !Number.isFinite(Date.parse(row.expiresAt)) || (row.status !== "failed" && !(Date.parse(row.expiresAt) > Date.now()))) {
+      throw new MorphPreviewCheckError("protocol", "The saved-preview list contained an invalid or expired job.");
+    }
+    seen.add(String(row.jobId));
+    return { jobId: String(row.jobId), status: row.status, createdAt: row.createdAt, expiresAt: row.expiresAt };
+  });
 }

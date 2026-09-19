@@ -8,6 +8,8 @@ test("a real request for actions offers the vetted TrueMax plan", () => {
     "Build me a routine around this",
     "Turn that into a plan",
     "Yes, do that.",
+    "Build a practical plan with up to three priorities.",
+    "Create a simple routine for me.",
   ]) {
     assert.equal(requestedActionPlan(question), true, question);
   }

@@ -46,7 +46,7 @@ export function parsePlanMemoryCommand(input: string): PlanMemoryCommand | null 
   if (added) {
     const title = cleanWords(added, 120);
     const normalizedTitle = normalisePlanTitle(title);
-    if (title.length < 2 || !normalizedTitle) return null;
+    if (title.length < 2 || !normalizedTitle || normalizedTitle.startsWith("protocol:") || unresolvedPlanReference(title)) return null;
     return { kind: "add", title, normalizedTitle, category: categoryFor(title, Boolean(addProduct)) };
   }
 
@@ -56,10 +56,14 @@ export function parsePlanMemoryCommand(input: string): PlanMemoryCommand | null 
   if (stopped?.[1]) {
     const title = cleanWords(stopped[1], 120);
     const normalizedTitle = normalisePlanTitle(title);
-    if (title.length < 2 || !normalizedTitle) return null;
+    if (title.length < 2 || !normalizedTitle || normalizedTitle.startsWith("protocol:") || unresolvedPlanReference(title)) return null;
     return { kind: "not_working", title, normalizedTitle };
   }
   return null;
+}
+
+export function unresolvedPlanReference(title: string): boolean {
+  return /^(?:(?:this|that|it|these|those)(?:\s+(?:one|ones|plan|routine|product|habit|action))?|(?:the\s+)?(?:above|same|last|first|second|third)(?:\s+(?:one|plan|routine|product|habit|action))?)$/i.test(title.trim());
 }
 
 export function conversationTitle(input: string): string {

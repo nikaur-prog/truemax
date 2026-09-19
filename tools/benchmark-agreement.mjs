@@ -1,128 +1,120 @@
-// Do we measure the same thing a competing product measures?
+// Compare explicitly confirmed, same-unit geometric measurements, not scores.
+// Product scores are context only and never fitting targets. A consistent
+// difference suggests a construction to review, not which reader is correct.
 //
-// Reads docs/benchmark-pairs.json — the same quantity on the same face, ours
-// against the number their UI displayed — and reports, per metric, whether our
-// disagreement is SYSTEMATIC (every face off in the same direction, which is a
-// bias we can find and fix) or scattered (which is noise, and no offset helps).
-//
-// What this is for, and what it is not for:
-//
-//   It is a measurement audit. If our canthal tilt reads low on every face, our
-//   ideal for canthal tilt may be sitting in exactly the right place and the
-//   MEASUREMENT is what needs correcting. Without this you cannot tell those two
-//   apart, and re-deriving an ideal that was already correct makes things worse.
-//
-//   It is NOT a calibration set. Nothing here may be fitted to their scores.
-//   Regressing our numbers onto theirs is reverse-engineering their scoring
-//   formula — the same thing as reading their code, done with arithmetic — and
-//   it is out of bounds. Their scores are printed for context and are never a
-//   target. See the header in the JSON.
-//
-// Four PEOPLE gives roughly four observations per metric. That is enough to FLAG
-// a consistent offset and not enough to CORRECT one; the flag's job is to order
-// the ideal-placement audit, which is then done against our own reference set.
-//
-//   node tools/benchmark-agreement.mjs
-
+// node tools/benchmark-agreement.mjs [private-pairs.json]
+// Without an argument, reads the historical docs/benchmark-pairs.json. Old rows
+// without explicit definition confirmation are held until reviewed; do not
+// silently approve them to preserve a previously printed result.
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const data = JSON.parse(readFileSync(new URL("../docs/benchmark-pairs.json", import.meta.url)));
-const faces = data.faces ?? [];
-if (!faces.length) {
-  console.error("No faces in docs/benchmark-pairs.json.");
-  process.exit(1);
+const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+const text = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
+
+function canonicalUnit(value) {
+  if (typeof value !== "string") return null;
+  const unit = value.trim();
+  if (["deg", "degree", "degrees", "°"].includes(unit)) return "°";
+  if (["", "x", "×", "ratio"].includes(unit)) return "ratio";
+  // These differences are percentage POINTS, never percentages of a possibly
+  // zero measurement. Fraction and percent groups are not silently combined.
+  if (unit === "%") return "pp";
+  if (unit.startsWith("% ")) return `pp ${unit.slice(2)}`;
+  return unit;
 }
 
-// Group every paired row by metric.
-const byMetric = new Map();
-const unconfirmed = [];
-for (const face of faces) {
-  for (const row of face.rows ?? []) {
-    if (!Number.isFinite(row.ours) || !Number.isFinite(row.theirs)) continue;
-    // A pairing whose two sides may not be the same quantity cannot contribute
-    // to a bias estimate. Averaging a definition mismatch in with genuine
-    // disagreements invents an offset and buries the real ones underneath it.
-    if (row.definitionConfirmed === false) {
-      unconfirmed.push({ metric: row.metric, face: face.name, ours: row.ours, theirs: row.theirs });
-      continue;
+/** Pure audit calculation. Importing this module never reads a dataset. */
+export function summarizeBenchmark(data) {
+  const faces = Array.isArray(data?.faces) ? data.faces : [];
+  const groups = new Map();
+  const held = [];
+  const faceSummaries = [];
+  for (const [index, face] of faces.entries()) {
+    const name = text(face?.name) ?? `Unnamed capture ${index + 1}`;
+    const person = text(face?.person) ?? text(face?.name);
+    let accepted = 0;
+    for (const row of Array.isArray(face?.rows) ? face.rows : []) {
+      const metric = text(row?.metric);
+      const unit = canonicalUnit(row?.unit);
+      let reason;
+      if (row?.definitionConfirmed !== true) reason = "definition not explicitly confirmed";
+      else if (!metric || !person) reason = "metric or person identifier missing";
+      else if (unit === null) reason = "measurement unit missing";
+      else if (!Number.isFinite(row.ours) || !Number.isFinite(row.theirs)) reason = "measurement unavailable";
+      else if (!Number.isFinite(row.ours - row.theirs)) reason = "measurement difference is not finite";
+      if (reason) {
+        held.push({ metric: metric ?? "unknown", face: name, reason });
+        continue;
+      }
+      const key = JSON.stringify([metric, unit]);
+      if (!groups.has(key)) groups.set(key, { metric, unit, observations: [] });
+      groups.get(key).observations.push({ person, delta: row.ours - row.theirs });
+      accepted++;
     }
-    if (!byMetric.has(row.metric)) byMetric.set(row.metric, []);
-    byMetric.get(row.metric).push({ ...row, face: face.name, person: face.person ?? face.name });
+    // Explicit context only: none of these scores enters measurement statistics.
+    faceSummaries.push({ name, accepted, ourOverall: face?.ourOverall, theirOverall: face?.theirOverall, theirGeometryOnly: face?.theirGeometryOnly });
   }
+
+  const rows = [...groups.values()].map(({ metric, unit, observations }) => {
+    const byPerson = new Map();
+    for (const observation of observations) {
+      if (!byPerson.has(observation.person)) byPerson.set(observation.person, []);
+      byPerson.get(observation.person).push(observation.delta);
+    }
+    const personDeltas = [...byPerson.values()].map((deltas) => ({
+      signed: mean(deltas), absolute: mean(deltas.map(Math.abs)),
+    }));
+    const signs = new Set(personDeltas.map((value) => Math.sign(value.signed)));
+    return {
+      metric, unit, n: observations.length, people: byPerson.size,
+      // Each person has equal weight even when one has many repeat captures.
+      meanDelta: mean(personDeltas.map((value) => value.signed)),
+      meanAbsDelta: mean(personDeltas.map((value) => value.absolute)),
+      maxAbsDelta: Math.max(...observations.map((value) => Math.abs(value.delta))),
+      consistent: byPerson.size >= 3 && signs.size === 1 && !signs.has(0),
+    };
+  }).sort((a, b) => a.metric.localeCompare(b.metric) || a.unit.localeCompare(b.unit));
+  return { faceCount: faces.length, rows, held, faces: faceSummaries };
 }
 
-const pct = (ours, theirs) => (theirs === 0 ? NaN : ((ours - theirs) / Math.abs(theirs)) * 100);
-const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
-
-console.log(`${faces.length} face(s), ${byMetric.size} metric(s) measured by both.\n`);
-
-const flagged = [];
-const rows = [];
-for (const [metric, obs] of [...byMetric].sort()) {
-  const deltas = obs.map((o) => o.ours - o.theirs);
-  const rel = obs.map((o) => pct(o.ours, o.theirs)).filter(Number.isFinite);
-  const signs = new Set(deltas.map((d) => (d > 0 ? 1 : d < 0 ? -1 : 0)));
-  // PEOPLE, not captures. Two photographs of one person share that person's
-  // bone structure, so if a construction disagrees on their face it disagrees
-  // on both captures — which looks like two confirmations and is one. Counting
-  // captures let three rows of Bieber-and-Cavill-twice read as "all 3 faces",
-  // and the flag it produced was really n=2.
-  const people = new Set(obs.map((o) => o.person));
-  // Every face off the same way, and by enough to matter. A single face can
-  // never satisfy "consistent" in any meaningful sense, so it is not claimed.
-  const consistent = people.size >= 3 && signs.size === 1 && !signs.has(0);
-  const meanRel = rel.length ? mean(rel) : NaN;
-  rows.push({ metric, n: obs.length, people: people.size, meanDelta: mean(deltas), meanRel, consistent });
-  if (consistent && Math.abs(meanRel) >= 3) flagged.push({ metric, meanRel, people: people.size });
-}
-
-const pad = (s, n) => String(s).padEnd(n);
-console.log(
-  pad("metric", 22) + pad("rows", 6) + pad("people", 8) + pad("mean Δ", 12) + pad("mean Δ%", 11) + "same direction",
-);
-console.log("-".repeat(72));
-for (const r of rows) {
-  console.log(
-    pad(r.metric, 22) +
-      pad(r.n, 6) +
-      pad(r.people, 8) +
-      pad(r.meanDelta.toFixed(3), 12) +
-      pad(Number.isFinite(r.meanRel) ? r.meanRel.toFixed(1) + "%" : "—", 11) +
-      (r.people < 3 ? "too few people" : r.consistent ? "YES" : "no"),
-  );
-}
-
-console.log("\nPer face:");
-for (const face of faces) {
-  const scored = face.rows?.filter((r) => Number.isFinite(r.ours) && Number.isFinite(r.theirs)) ?? [];
-  console.log(`  ${face.name}: ${scored.length} paired`
-    + (face.ourOverall != null ? `, ours ${face.ourOverall}` : "")
-    // Their geometry-only row where the UI exposes one, because their headline
-    // pillar includes vision-model judgements we take no measurement for, and
-    // comparing against it overstates the gap.
-    + (face.theirGeometryOnly != null
-        ? `, theirs ${face.theirGeometryOnly} (geometry only; pillar shows ${face.theirOverall})`
-        : face.theirOverall != null ? `, theirs ${face.theirOverall}` : ""));
-}
-
-if (unconfirmed.length) {
-  console.log("\nHeld out — the two sides may not be measuring the same thing:");
-  for (const u of unconfirmed) {
-    console.log(`  ${pad(u.metric, 22)} ${u.face}: ours ${u.ours} vs theirs ${u.theirs}`);
+export function formatBenchmark(summary) {
+  const pad = (value, width) => String(value).padEnd(width);
+  const number = (value) => value === 0 ? "0" : Number(value.toPrecision(6)).toString();
+  const lines = [
+    `${summary.faceCount} capture(s), ${summary.rows.length} explicitly confirmed metric/unit group(s).`,
+    "Differences are TrueMax minus benchmark, in native units (pp = percentage points).",
+    "Mean signed and absolute differences give each person equal weight. No percentage-relative error or score fitting.",
+    "",
+    pad("metric", 24) + pad("unit", 14) + pad("rows", 6) + pad("people", 8) + pad("signed mean", 14) + pad("mean absolute", 15) + pad("max absolute", 14) + "same direction",
+  ];
+  for (const row of summary.rows) {
+    lines.push(pad(row.metric, 24) + pad(row.unit, 14) + pad(row.n, 6) + pad(row.people, 8)
+      + pad(number(row.meanDelta), 14) + pad(number(row.meanAbsDelta), 15) + pad(number(row.maxAbsDelta), 14)
+      + (row.people < 3 ? "too few people" : row.consistent ? "yes, exploratory" : "no"));
   }
-  console.log("  Resolve each by construction, not by averaging it into a bias estimate.");
+  lines.push("", "Per capture (scores are context, not calibration targets):");
+  for (const face of summary.faces) {
+    lines.push(`  ${face.name}: ${face.accepted} confirmed pair(s)`
+      + (Number.isFinite(face.ourOverall) ? `, ours ${face.ourOverall}` : "")
+      + (Number.isFinite(face.theirGeometryOnly)
+        ? `, benchmark ${face.theirGeometryOnly} (geometry only)`
+        : Number.isFinite(face.theirOverall) ? `, benchmark ${face.theirOverall}` : ""));
+  }
+  if (summary.held.length) {
+    lines.push("", `Held out: ${summary.held.length} pair(s).`);
+    for (const row of summary.held) lines.push(`  ${row.metric} / ${row.face}: ${row.reason}`);
+  }
+  if (!summary.rows.length) lines.push("", "No explicitly confirmed measurement pairs to compare. Review definitions and units before interpreting agreement.");
+  lines.push("", "A shared direction is an exploratory review cue, not an accuracy verdict. No universal error tolerance has been set.",
+    "Check landmark constructions and independent annotations before changing measurements or reference ideals.");
+  return lines.join("\n");
 }
 
-if (!flagged.length) {
-  const thin = rows.filter((r) => r.people < 3).length;
-  console.log(
-    `\nNothing flagged.${thin ? ` ${thin} metric(s) have fewer than three PEOPLE — add more before reading anything into them.` : ""}`,
-  );
-} else {
-  console.log("\nSystematic offsets — re-check these measurements BEFORE moving their ideals:");
-  for (const f of flagged.sort((a, b) => Math.abs(b.meanRel) - Math.abs(a.meanRel))) {
-    console.log(`  ${pad(f.metric, 22)} ours reads ${f.meanRel > 0 ? "high" : "low"} by ${Math.abs(f.meanRel).toFixed(1)}% on all ${f.people} people`);
-  }
-  console.log("\nA consistent offset means the IDEAL may be fine and the measurement is not.");
-  console.log("Re-derive against our own reference set — never by adopting their numbers.");
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const input = process.argv[2] ?? new URL("../docs/benchmark-pairs.json", import.meta.url);
+  const summary = summarizeBenchmark(JSON.parse(readFileSync(input, "utf8")));
+  console.log(formatBenchmark(summary));
+  if (!summary.faceCount) process.exitCode = 1;
 }

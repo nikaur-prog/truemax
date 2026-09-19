@@ -1,10 +1,17 @@
-import { currentAccessToken } from "../engine/auth.js";
-import { maxCharacterMarkup, reactMax, wireMaxInteractions } from "./maxCharacter.js";
+import { currentAccessToken, onAuthChange } from "../engine/auth.js";
+import { maxCharacterMarkup, reactMax } from "./maxCharacter.js";
+import { mountMaxAvatar3D, type MaxAvatar3DHandle } from "./maxAvatar3d.js";
 import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
+import { buildCoachingSnapshot } from "../engine/maxContext.js";
+import { loadProfile } from "../engine/goals.js";
+import { readProtocols } from "../engine/protocol.js";
+import { activeScanOwner } from "../engine/scanScope.js";
+import "./maxRoutinePicker.css";
 import { allowanceLine } from "../engine/maxAllowance.js";
 import { requestedActionPlan } from "./maxActionBridge.js";
 import { drainMaxStream, maxStreamErrorMessage } from "./maxStream.js";
+import { maxReplyText } from "../engine/maxReplyText.js";
 import {
   announceMaxConversationChanged,
   loadMaxConversation,
@@ -24,10 +31,9 @@ import {
 // steady rate: the text lands smoothly, the mouth has something continuous to
 // animate against, and if the network stalls mid-sentence the buffer covers it.
 //
-// The photographs and measurement payload still never leave the device. The
-// words in a Max conversation do: members explicitly asked for the same durable
-// thread history they expect from other assistants, so authenticated message
-// text is stored account-side and can be reopened from the Coach tab.
+// Photos remain on-device. Bounded measurements, selected preferences and
+// routine evidence are sent to Max with the question; chats and routine notes
+// are stored for the signed-in account.
 // ---------------------------------------------------------------------------
 
 interface Turn {
@@ -45,6 +51,9 @@ let transcript: Turn[] = [];
 let inFlight: AbortController | null = null;
 let chatGeneration = 0;
 let keydownListener: ((event: KeyboardEvent) => void) | null = null;
+let chatAvatar: MaxAvatar3DHandle | null = null;
+let stopAuthWatch: (() => void) | null = null;
+let returnFocus: HTMLElement | null = null;
 // Every question put to him this session, so the follow-up chips never offer
 // one back.
 let askedThisSession: string[] = [];
@@ -55,8 +64,13 @@ export function isMaxChatOpen(): boolean {
 
 export function closeMaxChat(): void {
   chatGeneration += 1;
+  stopAuthWatch?.();
+  stopAuthWatch = null;
+  document.querySelector<HTMLDialogElement>(".max-routine-picker")?.close();
   inFlight?.abort();
   inFlight = null;
+  chatAvatar?.destroy();
+  chatAvatar = null;
   if (keydownListener) {
     document.removeEventListener("keydown", keydownListener);
     keydownListener = null;
@@ -65,19 +79,8 @@ export function closeMaxChat(): void {
   host = null;
   transcript = [];
   askedThisSession = [];
-}
-
-// The opener a person sees before they have typed anything. Deterministic and
-// written here rather than generated, because paying a model to say hello is
-// paying for the least interesting sentence in the conversation.
-function greeting(context: MaxChatContext | null): string {
-  if (!context) {
-    return "Hey. Run a scan first and I will have some numbers to work with. Then ask me anything about them.";
-  }
-  const weakest = context.focus[0]?.split(",")[0]?.replace(/\s*:\s*/g, " to ").toLowerCase();
-  return weakest
-    ? `Hey, I'm Max. I've got your scan. I'd start with ${weakest}, but ask me whatever you want.`
-    : "Hey, I'm Max. I've got your scan in front of me. Ask me anything about it.";
+  if (returnFocus?.isConnected) returnFocus.focus();
+  returnFocus = null;
 }
 
 export function openMaxChat(
@@ -89,9 +92,11 @@ export function openMaxChat(
     source?: "dashboard" | "post_analysis";
     conversationId?: string;
   } = {},
-): void {
-  if (host) return;
+): boolean {
+  if (host) return false;
   const generation = ++chatGeneration;
+  const owner = activeScanOwner();
+  returnFocus = document.activeElement as HTMLElement | null;
   transcript = [];
   let conversationId = options.conversationId ?? null;
   let loadingConversation = Boolean(conversationId);
@@ -104,7 +109,7 @@ export function openMaxChat(
         <span class="maxchat-face">${maxCharacterMarkup({ mood: "happy" })}</span>
         <span class="maxchat-who">
           <b>Coach Max</b>
-          <small>Reads your numbers. Does not make them up.</small>
+          <small>Your goals, routine and available scan readings.</small>
         </span>
         <button type="button" class="maxchat-close" aria-label="Close chat">&times;</button>
       </header>
@@ -116,9 +121,11 @@ export function openMaxChat(
         <button type="submit" aria-label="Send">Send</button>
       </form>
       <p class="maxchat-allowance" aria-live="polite" hidden></p>
+      <p class="maxchat-privacy">Your selected preferences, routine notes and available measurements are shared with Max. Photos are not sent in chat.</p>
     </div>`;
   document.body.appendChild(host);
-  wireMaxInteractions(host.querySelector(".maxchat-face"));
+  stopAuthWatch = onAuthChange(() => { if (activeScanOwner() !== owner) closeMaxChat(); });
+  chatAvatar = mountMaxAvatar3D(host.querySelector(".maxchat-face"), { state: "idle", playful: false });
 
   const log = host.querySelector<HTMLElement>(".maxchat-log")!;
   const action = host.querySelector<HTMLElement>(".maxchat-action")!;
@@ -150,51 +157,37 @@ export function openMaxChat(
 
   const renderPlanAction = (show: boolean): void => {
     action.innerHTML = "";
-    action.hidden = !show || !options.onOpenPlan;
+    action.hidden = !show;
     if (action.hidden) return;
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = "Choose habits to track";
-    button.onclick = () => {
-      const openPlan = options.onOpenPlan;
-      closeMaxChat();
-      openPlan?.();
+    button.textContent = "Choose routines for your goals";
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const { openMaxRoutinePicker } = await import("./maxRoutinePicker.js");
+        if (generation !== chatGeneration || !host || activeScanOwner() !== owner) return;
+        openMaxRoutinePicker(options.onOpenPlan ? () => { closeMaxChat(); options.onOpenPlan!(); } : undefined);
+      } catch {
+        if (generation === chatGeneration && host) say(log, "Routine options could not load. Try again.", "err");
+      } finally { button.disabled = false; }
     };
     action.appendChild(button);
   };
 
-  // He says hello in a new chat, and no longer waves about it.
-  //
-  // Opening the chat used to get a full big-wave entrance on the reasoning
-  // that somebody had just decided to talk to him. In practice it fires on
-  // every single open, which is the tic that greet() itself caps at two
-  // everywhere else — and the cap was explicitly waived here, so the one place
-  // he waves most often is the one place he never stops. An arm going up
-  // before a word appears also delays the thing the reader actually came for.
-  //
-  // The mouth still moves for exactly as long as the line takes to type;
-  // without that the greeting is a subtitle rather than somebody speaking. He
-  // earns attention with the idle repertoire instead (ui/maxIdle.ts), and a
-  // tap still gets a wave.
-  const face = host.querySelector<SVGSVGElement>(".maxchat-face .mx-svg");
-  // He LANDS rather than appears: the settle bounce on mount is the same
-  // follow-through every act ends with, and it is what makes opening the
-  // panel read as him arriving to talk rather than a header painting in.
-  if (face && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    face.classList.add("mx-settle");
-    window.setTimeout(() => face.classList.remove("mx-settle"), 600);
-  }
+  // New conversations start with a static context note, not another greeting.
   if (conversationId) {
     form.classList.add("busy");
     input.disabled = true;
     void loadMaxConversation(conversationId)
       .then((detail) => {
-        if (generation !== chatGeneration || !host) return;
+        if (generation !== chatGeneration || !host || activeScanOwner() !== owner) return;
         transcript = detail.messages.map((message) => ({ role: message.role, content: message.content }));
+        askedThisSession = transcript.filter((turn) => turn.role === "user").map((turn) => turn.content);
         log.innerHTML = "";
         for (const turn of transcript) say(log, turn.content, turn.role === "user" ? "you" : "max");
         renderChips(suggestFollowUps(
-          context,
+          context ? { ...context, coaching: buildCoachingSnapshot(loadProfile(), readProtocols()) } : null,
           transcript[transcript.length - 1]?.content ?? "",
           askedThisSession,
         ));
@@ -202,18 +195,18 @@ export function openMaxChat(
       .catch((error) => {
         if (generation !== chatGeneration || !host) return;
         say(log, error instanceof Error ? error.message : "That chat could not be loaded.", "err");
+        // Do not silently append to a transcript the user could not inspect.
+        conversationId = null;
       })
       .finally(() => {
         if (generation !== chatGeneration || !host) return;
         loadingConversation = false;
         input.disabled = false;
         form.classList.remove("busy");
+        if (options.initialQuestion?.trim() && input.value.trim()) form.requestSubmit();
       });
   } else {
-    face?.classList.add("speaking");
-    speakGreeting(log, options.greeting ?? greeting(context), () => {
-      face?.classList.remove("speaking");
-    });
+    say(log, options.greeting ?? (context ? "Ask about this scan or your current routine." : "Choose a goal or ask a question to get started."), "note");
     renderChips(OPENING_SUGGESTIONS);
   }
 
@@ -224,7 +217,20 @@ export function openMaxChat(
   // Escape closes, which is the one keyboard affordance a modal genuinely owes
   // somebody. closeMaxChat removes this exact listener on every close path.
   keydownListener = (event: KeyboardEvent): void => {
-    if (event.key === "Escape") closeMaxChat();
+    // A native child dialog owns Escape until it closes. Dismissing the routine
+    // picker must not also destroy the conversation behind it.
+    if (event.key === "Escape" && !document.querySelector("dialog[open]")) closeMaxChat();
+    if (event.key === "Tab" && host && !document.querySelector("dialog[open]")) {
+      const focusable = [...host.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)")]
+        .filter((node) => node.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !host.contains(document.activeElement))) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !host.contains(document.activeElement))) {
+        event.preventDefault(); first?.focus();
+      }
+    }
   };
   document.addEventListener("keydown", keydownListener);
 
@@ -238,6 +244,7 @@ export function openMaxChat(
     renderChips([]);
     void ask(log, form, question, context, generation, {
       conversationId,
+      owner,
       source: options.source ?? (context ? "post_analysis" : "dashboard"),
       onConversation: (id) => {
         conversationId = id;
@@ -245,9 +252,10 @@ export function openMaxChat(
     }).then((reply) => {
       if (generation !== chatGeneration || !host) return;
       renderPlanAction(Boolean(reply) && requestedActionPlan(question));
-      renderChips(reply ? suggestFollowUps(context, reply, askedThisSession) : []);
+      renderChips(reply ? suggestFollowUps(context ? { ...context, coaching: buildCoachingSnapshot(loadProfile(), readProtocols()) } : null, reply, askedThisSession) : []);
     });
   };
+  input.addEventListener("input", () => { if (!inFlight) chatAvatar?.setState(input.value.trim() ? "listening" : "idle"); });
 
   if (options.initialQuestion?.trim()) {
     input.value = options.initialQuestion.trim().slice(0, 600);
@@ -259,63 +267,7 @@ export function openMaxChat(
   // Not on touch: focusing an input pops the keyboard over the character the
   // person just tapped to meet, which is a poor hello.
   if (window.matchMedia("(pointer: fine)").matches) input.focus();
-}
-
-// Max's opening line types itself out, ONCE.
-//
-// Everything else in this app that used to type has stopped, and for a good
-// reason: withholding a measurement you have already produced, one character
-// at a time, is theatre at the reader's expense. Max's greeting is the
-// exception because it is not a measurement — it is somebody speaking, and
-// speech arriving as a finished block is the thing that makes a chat window
-// feel like a form.
-//
-// Once. Closing the panel and opening it again shows the line already said,
-// because the second performance of a greeting is not a greeting, and having
-// to sit through it to get back to a conversation is worse than never having
-// had it. The flag is set when typing STARTS, so ducking out halfway does not
-// buy a replay either.
-let spokenGreeting: string | null = null;
-
-const SPEAK_MS_PER_CHAR = 16;
-
-function speakGreeting(log: HTMLElement, text: string, onDone: () => void = () => {}): void {
-  const row = say(log, "", "max");
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  if (reduced || spokenGreeting === text) {
-    row.textContent = text;
-    spokenGreeting = text;
-    onDone();
-    return;
-  }
-  spokenGreeting = text;
-
-  // Height is claimed up front so the composer below does not get shoved down
-  // a line at a time while he talks.
-  row.style.minHeight = "0px";
-  const measure = say(log, text, "max");
-  measure.style.visibility = "hidden";
-  measure.style.position = "absolute";
-  row.style.minHeight = `${measure.offsetHeight}px`;
-  measure.remove();
-
-  const start = performance.now();
-  const total = text.length * SPEAK_MS_PER_CHAR;
-  const step = (now: number) => {
-    if (!row.isConnected) {
-      onDone();
-      return;
-    }
-    const p = Math.min(1, (now - start) / total);
-    row.textContent = text.slice(0, Math.round(text.length * p));
-    if (p < 1) {
-      requestAnimationFrame(step);
-    } else {
-      row.style.minHeight = "";
-      onDone();
-    }
-  };
-  requestAnimationFrame(step);
+  return true;
 }
 
 // A finished line from Max, with no typing animation. Used for replies and for
@@ -323,7 +275,7 @@ function speakGreeting(log: HTMLElement, text: string, onDone: () => void = () =
 function say(log: HTMLElement, text: string, kind = "max"): HTMLElement {
   const row = document.createElement("p");
   row.className = `maxchat-msg maxchat-${kind}`;
-  row.textContent = text;
+  row.textContent = kind === "max" ? maxReplyText(text) : text;
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
   return row;
@@ -337,11 +289,12 @@ async function ask(
   generation: number,
   persistence: {
     conversationId: string | null;
+    owner?: string | null;
     source: "dashboard" | "post_analysis";
     onConversation: (id: string) => void;
   },
 ): Promise<string | null> {
-  const isCurrent = (): boolean => generation === chatGeneration && log.isConnected && form.isConnected;
+  const isCurrent = (): boolean => generation === chatGeneration && log.isConnected && form.isConnected && (persistence.owner === undefined || persistence.owner === activeScanOwner());
   say(log, question, "you");
   transcript.push({ role: "user", content: question });
 
@@ -358,6 +311,7 @@ async function ask(
   // four-second wait reads as frozen.
   face?.classList.remove("mx-mood-happy");
   face?.classList.add("mx-mood-thinking");
+  chatAvatar?.setState("thinking");
 
   const controller = new AbortController();
   inFlight = controller;
@@ -385,6 +339,7 @@ async function ask(
     face?.classList.remove("mx-mood-thinking");
     face?.classList.add("mx-mood-happy");
     face?.classList.add("speaking");
+    chatAvatar?.setState("speaking");
   };
 
   try {
@@ -392,7 +347,8 @@ async function ask(
     if (!isCurrent()) return null;
     if (controller.signal.aborted) throw controller.signal.reason;
     if (!token) {
-      fail(bubble, "Sign in and I'll be right here.");
+      fail(bubble, "Sign in to continue this chat.");
+      transcript.pop();
       return null;
     }
 
@@ -403,7 +359,7 @@ async function ask(
       // the dashboard chat look available and then fail every first message at
       // the server's malformed-client boundary.
       body: JSON.stringify({
-        context: context ?? {},
+        context: { ...(context ?? {}), coaching: buildCoachingSnapshot(loadProfile(), readProtocols()), planActionAvailable: true },
         messages: transcript,
         conversationId: persistence.conversationId,
         source: persistence.source,
@@ -424,7 +380,7 @@ async function ask(
       // server's "tomorrow", which is a UTC day boundary.
       const wall = response.status === 429 ? allowanceLine(0, detail?.resetsAt) : null;
       if (wall) showAllowance(wall);
-      fail(bubble, wall ?? detail?.error ?? "I could not get through just then. Try me again?");
+      fail(bubble, wall ?? detail?.error ?? "The reply could not load. Please try again.");
       // A refusal is not part of the conversation, and leaving the question in
       // the transcript would send it again on the next message as though Max
       // had already seen it.
@@ -462,6 +418,7 @@ async function ask(
       waiting: (on) => {
         const dots = bubble.querySelector<HTMLElement>(".mc-wait");
         if (dots) dots.hidden = !on;
+        if (isCurrent()) chatAvatar?.setState(on ? "thinking" : "speaking");
       },
     });
     if (!isCurrent()) return null;
@@ -469,7 +426,7 @@ async function ask(
     // an empty bubble that stayed empty for good, and an empty assistant turn
     // in the transcript that every later message would carry along.
     if (!said.trim()) {
-      fail(bubble, "I went blank there, which is on me. Ask me that again?");
+      fail(bubble, "No reply came through. Please try again.");
       transcript.pop();
       return null;
     }
@@ -491,6 +448,7 @@ async function ask(
     // that left the thinking class on would strand him mid-thought with a
     // thought bubble over an error message, and nothing would ever clear it.
     if (generation === chatGeneration) {
+      chatAvatar?.setState("idle");
       if (face?.isConnected) {
         face.classList.remove("speaking", "mx-mood-thinking");
         face.classList.add("mx-mood-happy");

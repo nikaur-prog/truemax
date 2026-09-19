@@ -21,7 +21,7 @@ test("untouched and already prompted automatic placement do not add a consent as
 test("automatic answers are remembered before a fallback to manual correction", () => {
   const source = readFileSync(new URL("../ui/sideFlow.ts", import.meta.url), "utf8");
   const automatic = source.slice(source.indexOf("const afterAutomatic ="), source.indexOf("const releaseFurniture ="));
-  assert.equal(automatic.match(/consentAnswer = await askSideFeedbackConsent\(\)/g)?.length, 2);
+  assert.equal(automatic.match(/consentAnswer = ctx\.feedbackEligible === true \? await askSideFeedbackConsent\(\) : false/g)?.length, 2);
   assert.match(automatic, /verified: true, consented: consentAnswer/);
   assert.match(automatic, /verified: false, consented: consentAnswer/);
   assert.match(source, /shouldAskSideCorrectionConsent\(Boolean\(opts\.auto\), consentAnswer, moved\.length\)/);

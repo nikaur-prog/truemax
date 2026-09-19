@@ -25,8 +25,8 @@ export const MAX_3D_EXAMPLES: readonly Max3DExample[] = [
     { at: 10_000, state: "angry", view: "front", label: "Playfully grumpy" },
   ] },
   { id: "mirror-skate-guitar", title: "Playful routines", durationMs: 15_000, steps: [
-    { at: 0, state: "mirror", view: "three-quarter", label: "Mirror check" },
-    { at: 5_000, state: "skate", view: "three-quarter", label: "Skating on the spot" },
+    { at: 0, state: "mirror", view: "front", label: "Mirror check and wink" },
+    { at: 5_000, state: "skate", view: "front", label: "Skateboard reveal and kickflip" },
     { at: 10_000, state: "guitar", view: "front", label: "Air-time guitar" },
   ] },
 ];

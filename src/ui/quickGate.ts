@@ -57,8 +57,8 @@ const DENIED: QuickAccess = { allowed: false, staff: false, owner: false, userId
  * Not just a boolean any more, because the page gates twice: once at the door
  * (allowed at all?) and once per pillar (the owner ticks grants at approval,
  * and a grant the interface ignores is a checkbox that lies). Staff see
- * everything; a creator sees the pillars they were granted. Calibrate stays
- * staff-only, while paid generation is controlled by the `studio` grant and a
+ * creator tools; a creator sees the pillars they were granted. Calibrate stays
+ * owner-admin-only, while paid generation is controlled by the `studio` grant and a
  * server-side render reservation. Brand Engine and Calibration are resolved
  * separately from the explicit owner role returned by the server.
  */

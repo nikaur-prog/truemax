@@ -1,3 +1,5 @@
+import { maxReplyText } from "../engine/maxReplyText.js";
+
 // A stream and its paced presentation are one lifecycle. A reader failure or
 // cancellation must settle both, even when animation frames are suspended.
 const DRAIN_CPS = 55;
@@ -23,14 +25,6 @@ const frameClock: MaxStreamClock = {
   request: (callback) => requestAnimationFrame(callback),
   cancel: (id) => cancelAnimationFrame(id),
 };
-
-function scrub(raw: string): string {
-  return raw
-    .replace(/\*\*|__|`/g, "")
-    .replace(/\*([^*\n]{1,80})\*/g, "$1")
-    .replace(/^#{1,4}\s+/gm, "")
-    .replace(/^(\s*)[*•]\s+/gm, "$1- ");
-}
 
 /** A deliberate close is silent; a timed-out active request is not. */
 export function maxStreamErrorMessage(error: unknown, signal: AbortSignal): string | null {
@@ -140,7 +134,7 @@ export function drainMaxStream(
     };
     const receive = (chunk: string): void => {
       raw += chunk;
-      const next = scrub(raw);
+      const next = maxReplyText(raw);
       if (next !== text) grewAt = clock.now();
       text = next;
     };

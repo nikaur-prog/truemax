@@ -1,6 +1,8 @@
 import type { Report, Sex } from "./types.js";
 import { METRICS } from "./metrics.js";
+import { SIDE_METRICS } from "./sideMetrics.js";
 import { scopedStorageKey } from "./scanScope.js";
+import type { CalibrationDiagnostics } from "./calibrationDiagnostics.js";
 
 // ---------------------------------------------------------------------------
 // Collecting rated faces, so the corpus can grow without being assembled by
@@ -28,6 +30,21 @@ import { scopedStorageKey } from "./scanScope.js";
 // ---------------------------------------------------------------------------
 
 const KEY = "tm.calibration.v1";
+
+/** Deliberate anonymous dataset key, never derived from a person's private label. */
+export function validCalibrationReferenceId(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(value);
+}
+
+export function calibrationReferenceId(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "string" && !value.trim()) return undefined;
+  const referenceId = typeof value === "string" ? value.trim() : value;
+  if (!validCalibrationReferenceId(referenceId)) {
+    throw new Error("Use an anonymous reference ID such as f01: 1 to 32 lowercase letters, numbers, hyphens or underscores, starting with a letter. No names or emails.");
+  }
+  return referenceId;
+}
 
 /**
  * Where the number in `rating` came from.
@@ -75,6 +92,8 @@ export type RatingSource =
 
 export interface RatedFace {
   id: string;
+  /** Optional anonymous dataset identifier. Included only in private diagnostics, never the fitting corpus. */
+  referenceId?: string;
   sex: Sex;
   /**
    * What a human says the face is worth, 1–10. The thing being fitted TO.
@@ -137,6 +156,8 @@ export interface RatedFace {
    * re-checked or removed while the face is still around to re-scan.
    */
   suspect?: number;
+  /** Raw capture evidence for review; never included in the fitting corpus. */
+  diagnostics?: CalibrationDiagnostics;
   measurements: Record<string, number>;
 }
 
@@ -152,14 +173,71 @@ export function loadCalibrationSet(): RatedFace[] {
   }
 }
 
-function save(faces: RatedFace[]): void {
+interface CalibrationSnapshot {
+  key: string;
+  raw: string | null;
+  faces: RatedFace[];
+}
+
+/** Mutations must not mistake an unreadable existing set for an empty one. */
+function readForUpdate(): CalibrationSnapshot {
+  const key = scopedStorageKey(KEY);
+  if (!key?.startsWith(`${KEY}:user:`)) throw new Error("Sign in again before saving this calibration face.");
+  let raw: string | null;
   try {
-    const key = scopedStorageKey(KEY);
-    if (!key) return;
-    localStorage.setItem(key, JSON.stringify(faces));
+    raw = localStorage.getItem(key);
   } catch {
-    // A full quota is not worth interrupting a scan over. The set in memory is
-    // still correct for this session and the export still works.
+    throw new Error("Your saved calibration set could not be read. Keep this capture open and try again before saving.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = raw === null ? [] : JSON.parse(raw);
+  } catch {
+    throw new Error("Your saved calibration set could not be read. Nothing was overwritten. Keep this capture open and recover your saved set first.");
+  }
+  if (!Array.isArray(parsed) || parsed.some((row) =>
+    !row || typeof row !== "object" || typeof row.id !== "string"
+    || (row.sex !== "male" && row.sex !== "female")
+    || !row.measurements || typeof row.measurements !== "object" || Array.isArray(row.measurements)
+  ) || new Set(parsed.map((row) => row.id)).size !== parsed.length) {
+    throw new Error("Your saved calibration set is not readable. Nothing was overwritten. Keep this capture open and recover your saved set first.");
+  }
+  return { key, raw, faces: parsed as RatedFace[] };
+}
+
+/** Export must fail visibly rather than turn an unreadable saved set into an empty backup. */
+export function loadCalibrationSetForExport(): RatedFace[] {
+  return readForUpdate().faces;
+}
+
+function save(faces: RatedFace[], snapshot: CalibrationSnapshot): void {
+  const { key, raw } = snapshot;
+  const next = JSON.stringify(faces);
+  if (scopedStorageKey(KEY) !== key) throw new Error("Your account changed. Sign in again before saving this calibration face.");
+  if (localStorage.getItem(key) !== raw) {
+    throw new Error("Your calibration set changed in another window. Keep this capture open and reload the set before saving.");
+  }
+  try {
+    // Browser setItem is atomic, including quota failures. Confirm persistence
+    // before the UI releases its only in-memory copy of the capture.
+    localStorage.setItem(key, next);
+    if (localStorage.getItem(key) !== next) {
+      throw new Error("Your calibration save could not be confirmed. Keep this capture open and try again.");
+    }
+    if (scopedStorageKey(KEY) !== key) {
+      throw new Error("Your account changed. Sign in again before saving this calibration face.");
+    }
+  } catch (cause) {
+    // Roll back only our exact write, never a newer write from another tab.
+    // If storage is inaccessible, retain the pending capture and surface the
+    // failure rather than claiming that either the save or rollback succeeded.
+    try {
+      if (localStorage.getItem(key) === next) {
+        if (raw === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, raw);
+      }
+    } catch { /* The original failure remains actionable at the call site. */ }
+    throw cause;
   }
 }
 
@@ -208,9 +286,14 @@ export function addRatedFace(
   // The row's audit trail: the thumbnail that says which face this is, and
   // the implausible-reading count that says whether to trust it. Optional as
   // a pair because both come from the same capture context.
-  extras?: { thumb?: string; suspect?: number },
+  extras?: { thumb?: string; suspect?: number; diagnostics?: CalibrationDiagnostics; referenceId?: string },
 ): RatedFace[] {
-  const faces = loadCalibrationSet();
+  const referenceId = calibrationReferenceId(extras?.referenceId);
+  const snapshot = readForUpdate();
+  const faces = snapshot.faces;
+  if (referenceId && faces.some((face) => face.sex === report.sex && face.referenceId === referenceId)) {
+    throw new Error(`Reference ${referenceId} is already saved for this reference group. Review that row first, or use a separate ID such as ${referenceId}-retake for another capture.`);
+  }
   const sexPrefix = report.sex === "male" ? "m" : "w";
   // One past the HIGHEST id in use, not one past the count.
   //
@@ -232,6 +315,7 @@ export function addRatedFace(
   const n = (used.length ? Math.max(...used) : 0) + 1;
   faces.push({
     id: `${sexPrefix}${n}`,
+    ...(referenceId ? { referenceId } : {}),
     sex: report.sex,
     rating,
     scored: report.overall,
@@ -239,9 +323,10 @@ export function addRatedFace(
     ...(label ? { label } : {}),
     ...(extras?.thumb ? { thumb: extras.thumb } : {}),
     ...(extras?.suspect ? { suspect: extras.suspect } : {}),
+    ...(extras?.diagnostics ? { diagnostics: structuredClone(extras.diagnostics) } : {}),
     measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
-  save(faces);
+  save(faces, snapshot);
   return faces;
 }
 
@@ -264,16 +349,27 @@ export function addRatedFace(
  * who knows which happened.
  */
 export function reviseRating(id: string, rating: number, keepsProvenance: boolean): RatedFace[] {
-  const faces = loadCalibrationSet().map((f) =>
-    f.id === id ? { ...f, rating, ratedBy: (keepsProvenance ? "self" : "revised") as RatingSource } : f,
+  if (!Number.isFinite(rating) || rating < 1 || rating > 10) throw new Error("Enter a rating from 1 to 10.");
+  const snapshot = readForUpdate();
+  if (!snapshot.faces.some((face) => face.id === id)) throw new Error("That calibration face is no longer in your set. Reload the set before editing.");
+  const faces = snapshot.faces.map((f) =>
+    f.id === id ? {
+      ...f,
+      rating,
+      // Correcting a typo cannot turn a borrowed or already revised score into
+      // an independent human label. Unknown legacy provenance stays unknown.
+      ratedBy: f.ratedBy === "external" ? "external" : keepsProvenance ? f.ratedBy : "revised",
+    } as RatedFace : f,
   );
-  save(faces);
+  save(faces, snapshot);
   return faces;
 }
 
 export function removeRatedFace(id: string): RatedFace[] {
-  const faces = loadCalibrationSet().filter((f) => f.id !== id);
-  save(faces);
+  const snapshot = readForUpdate();
+  if (!snapshot.faces.some((face) => face.id === id)) throw new Error("That calibration face is no longer in your set. Reload the set before editing.");
+  const faces = snapshot.faces.filter((f) => f.id !== id);
+  save(faces, snapshot);
   return faces;
 }
 
@@ -287,8 +383,14 @@ export function removeRatedFace(id: string): RatedFace[] {
  * there is no "confirm all".
  */
 export function confirmOwnRating(id: string): RatedFace[] {
-  const faces = loadCalibrationSet().map((f) => (f.id === id ? { ...f, ratedBy: "self" as const } : f));
-  save(faces);
+  const snapshot = readForUpdate();
+  const face = snapshot.faces.find((row) => row.id === id);
+  if (!face) throw new Error("That calibration face is no longer in your set. Reload the set before editing.");
+  if (face.ratedBy === "external" || face.ratedBy === "revised") {
+    throw new Error("External or revised ratings cannot be relabelled as independent human ratings.");
+  }
+  const faces = snapshot.faces.map((f) => (f.id === id ? { ...f, ratedBy: "self" as const } : f));
+  save(faces, snapshot);
   return faces;
 }
 
@@ -314,7 +416,7 @@ export function splitByProvenance(faces: RatedFace[]): { own: RatedFace[]; withh
 }
 
 export function clearCalibrationSet(): void {
-  save([]);
+  save([], readForUpdate());
 }
 
 /**
@@ -347,6 +449,25 @@ export function corpusJSON(faces: RatedFace[]): string {
   )}\n`;
 }
 
+/** All captures, including unrated/external rows. Review data is not a fitting corpus. */
+export function calibrationDiagnosticsJSON(faces: RatedFace[]): string {
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    purpose: "landmark-and-measurement-review-not-training-labels",
+    notice: "Includes all saved captures and explicitly entered anonymous reference IDs. Operator-reviewed points are not expert labels. Photos and private labels are omitted; keep this export private.",
+    faces: faces.map((face) => ({
+      id: face.id,
+      ...(validCalibrationReferenceId(face.referenceId) ? { referenceId: face.referenceId } : {}),
+      referenceGroup: face.sex,
+      rating: face.rating,
+      ratingSource: face.ratedBy ?? "unknown",
+      scored: face.scored,
+      measurements: face.measurements,
+      diagnostics: face.diagnostics ?? null,
+    })),
+  }, null, 2)}\n`;
+}
+
 /**
  * Which metrics no face in the set carries yet, for one view.
  *
@@ -357,15 +478,15 @@ export function corpusJSON(faces: RatedFace[]): string {
  * empty side one behind a single reassuring count.
  */
 export function missingCoverage(faces: RatedFace[], view: "front" | "side" = "front"): string[] {
-  return METRICS.filter((m) => m.view === view)
-    .filter((m) => !faces.some((f) => m.id in f.measurements))
+  const definitions = view === "side" ? SIDE_METRICS : METRICS;
+  return definitions
+    .filter((m) => !faces.some((f) => Number.isFinite(f.measurements[m.id])))
     .map((m) => m.id);
 }
 
 /** How many faces in the set carry any side measurement at all. */
 export function sideCount(faces: RatedFace[]): number {
-  const side = METRICS.filter((m) => m.view === "side");
-  return faces.filter((f) => side.some((m) => m.id in f.measurements)).length;
+  return faces.filter((f) => SIDE_METRICS.some((m) => Number.isFinite(f.measurements[m.id]))).length;
 }
 
 /**
@@ -384,6 +505,7 @@ export interface SetHealth {
   sex: Sex;
   count: number;
   spread: number;
+  /** Collection target only, never evidence that scoring has been validated. */
   enough: boolean;
   note: string;
 }
@@ -403,6 +525,6 @@ export function setHealth(faces: RatedFace[], sex: Sex): SetHealth {
     note = `ratings only span ${spread.toFixed(1)} points; add faces at the ends, not the middle`;
   } else if (count < WANT_PER_SEX) {
     note = `${WANT_PER_SEX - count} more to go`;
-  } else note = "enough to fit directions from";
+  } else note = "pilot collection target met; independent validation still needed";
   return { sex, count, spread, enough, note };
 }

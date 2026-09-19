@@ -30,6 +30,7 @@ test("the plan preview distinguishes selected goals from Max's full view", () =>
   assert.match(html, />Profile</);
   assert.match(html, /Identity and bone structure stay fixed/);
   assert.doesNotMatch(html, /Create my visual target/);
+  assert.doesNotMatch(html, /data-morph-recover|data-morph-saved/);
   assert.doesNotMatch(html, /—/);
   assert.match(html, /Illustrative preview/);
   assert.doesNotMatch(html, /pts available|pts on completion|Complete after at least|\d+ to \d+ weeks/);
@@ -40,5 +41,6 @@ test("the render action appears only behind its rollout gate", () => {
   const selected = buildMorphBlueprint(report, profile, "selected", false);
   const maxVision = buildMorphBlueprint(report, profile, "max_vision", false);
   assert.match(morphPreviewHTML({ selected, maxVision, renderEnabled: true }), /Create my visual target/);
+  assert.match(morphPreviewHTML({ selected, maxVision, renderEnabled: true }), /data-morph-recover/);
   assert.doesNotMatch(morphPreviewHTML({ selected, maxVision, renderEnabled: true }), />Profile</);
 });

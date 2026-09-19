@@ -7,8 +7,10 @@ import type { MorphBlueprint, MorphEffectId } from "../src/engine/morphPlan.js";
 import { MORPH_EFFECT_LAYERS } from "../src/engine/morphEffects.js";
 import { parseMorphNumericRecipe, type MorphNumericRecipe } from "./_morphRecipe.js";
 import { isScanId } from "../src/engine/scanSession.js";
+import { storedMorphRecipeKey } from "../src/engine/morphRecovery.js";
 import { maxAccessForUser } from "./_maxAccess.js";
 import { previewInstructions, previewProvider } from "./_previewProvider.js";
+import { previewGenerationUnavailable } from "./_previewGenerationGate.js";
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 import {
   GOAL_PREVIEW_BUCKET,
@@ -55,6 +57,7 @@ export const EFFECT_LAYERS = MORPH_EFFECT_LAYERS;
 
 export interface MorphRequestInput {
   scanId: string;
+  requestId?: string;
   variant: "selected" | "max_vision";
   front: Buffer;
   side: Buffer | null;
@@ -84,6 +87,7 @@ export function parseMorphRequest(value: unknown): MorphRequestInput | { error: 
   if (raw.version !== 1) return { error: "The preview request version is not one this server knows." };
   if (raw.variant !== "selected" && raw.variant !== "max_vision") return { error: "The preview variant is unknown." };
   if (!isScanId(raw.scanId)) return { error: "The request must name the scan it previews." };
+  if (raw.requestId !== undefined && !isScanId(raw.requestId)) return { error: "The request identifier is invalid." };
   const privacy = raw.privacy as Record<string, unknown> | undefined;
   if (!privacy || privacy.purpose !== "goal-preview" || privacy.retainSource !== false) {
     return { error: "The preview request must state its purpose and that the source is not retained." };
@@ -114,6 +118,7 @@ export function parseMorphRequest(value: unknown): MorphRequestInput | { error: 
   if ("error" in recipe) return recipe;
   return {
     scanId: raw.scanId,
+    ...(typeof raw.requestId === "string" ? { requestId: raw.requestId } : {}),
     variant: raw.variant,
     front,
     side,
@@ -146,6 +151,9 @@ function validationBlock(clientPassed: boolean): ValidationBlock {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const unavailable = previewGenerationUnavailable();
+  if (unavailable) return unavailable;
+  const rejected = (body: Record<string, unknown>, status: number) => json({ ...body, requestRejected: true }, status);
   let claimedUserId: string | null = null;
   let previewId: string | null = null;
   const admin = getSupabaseAdmin();
@@ -158,26 +166,27 @@ export async function POST(request: Request): Promise<Response> {
   };
   const markFailed = async () => {
     if (!previewId) return;
-    await admin.from("goal_previews").update({ status: "failed" }).eq("id", previewId);
+    const { error } = await admin.from("goal_previews").update({ status: "failed" }).eq("id", previewId);
+    if (error) throw new Error(`Preview failure could not be recorded: ${error.message}`);
   };
   try {
-    if (!requestOrigin(request)) return json({ error: "Cross-origin previews are not allowed." }, 403);
+    if (!requestOrigin(request)) return rejected({ error: "Cross-origin previews are not allowed." }, 403);
     const user = await authenticatedUser(request);
-    if (!user) return json({ error: "Sign in to make a Goal preview." }, 401);
+    if (!user) return rejected({ error: "Sign in to make a Goal preview." }, 401);
     const access = await maxAccessForUser(user.id);
-    if (!access.ok) return json({ error: access.error, ...(access.upgrade ? { upgrade: access.upgrade } : {}) }, access.status);
-    if (access.age < 18) return json({ error: "Goal preview is available from age 18." }, 403);
-    if (!(await consented(user.id))) return json({ error: "Choose Goal preview in Settings first." }, 403);
+    if (!access.ok) return rejected({ error: access.error, ...(access.upgrade ? { upgrade: access.upgrade } : {}) }, access.status);
+    if (access.age < 18) return rejected({ error: "Goal preview is available from age 18." }, 403);
+    if (!(await consented(user.id))) return rejected({ error: "Choose Goal preview in Settings first." }, 403);
 
     const declared = Number(request.headers.get("content-length") ?? "0");
-    if (declared > MAX_BODY_BYTES) return json({ error: "Those photos are too large." }, 413);
+    if (declared > MAX_BODY_BYTES) return rejected({ error: "Those photos are too large." }, 413);
     const parsed = parseMorphRequest(await request.json().catch(() => null));
-    if ("error" in parsed) return json({ error: parsed.error }, 400);
+    if ("error" in parsed) return rejected({ error: parsed.error }, 400);
     const allowed = specAllowed({ goalIds: parsed.goalIds, layers: parsed.layers, catalogueVersion: GOAL_CATALOGUE_VERSION }, true);
-    if (!allowed.ok) return json({ error: allowed.reason }, 400);
+    if (!allowed.ok) return rejected({ error: allowed.reason }, 400);
 
     const provider = previewProvider();
-    if (!provider) return json({ error: "Goal preview is not configured on this deployment." }, 503);
+    if (!provider) return rejected({ error: "Goal preview is not configured on this deployment." }, 503);
 
     const { data: remaining, error: claimError } = await admin.rpc("claim_goal_preview_render", {
       p_user_id: user.id,
@@ -185,7 +194,7 @@ export async function POST(request: Request): Promise<Response> {
     });
     if (claimError) throw new Error(`Preview allowance is unavailable: ${claimError.message}`);
     if (typeof remaining === "number" && remaining < 0) {
-      return json(
+      return rejected(
         { error: `That is ${GOAL_PREVIEW_RENDERS_PER_DAY} previews today, which is the daily limit. Your plan is still here.`, resetsAt: nextUtcMidnight() },
         429,
       );
@@ -193,7 +202,7 @@ export async function POST(request: Request): Promise<Response> {
     claimedUserId = user.id;
 
     previewId = randomUUID();
-    const spec = { contract: "morph-preview-1", variant: parsed.variant, goalIds: parsed.goalIds, layers: parsed.layers, hasSide: parsed.hasSide, catalogueVersion: GOAL_CATALOGUE_VERSION, recipe: parsed.recipe };
+    const spec = { contract: "morph-preview-1", variant: parsed.variant, goalIds: parsed.goalIds, layers: parsed.layers, hasSide: parsed.hasSide, catalogueVersion: GOAL_CATALOGUE_VERSION, recipe: parsed.recipe, ...(parsed.requestId ? { requestId: parsed.requestId } : {}) };
     const { error: insertError } = await admin.from("goal_previews").insert({
       id: previewId,
       user_id: user.id,
@@ -259,30 +268,91 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     console.error("morph-preview", safeMessage(error));
     await releaseClaim().catch((releaseError) => console.error("morph-preview release", safeMessage(releaseError)));
-    await markFailed().catch(() => undefined);
-    return json({ status: "failed", ...(previewId ? { jobId: previewId } : {}), error: "The preview could not be made just then." }, 500);
+    const failed = await markFailed().then(() => true, () => false);
+    return json({ status: failed ? "failed" : "processing", ...(previewId ? { jobId: previewId } : { requestRejected: true }), error: "The preview could not be made just then." }, 500);
   }
 }
 
-/** Poll a job: the stored preview, with the client gates true once its verdict has been posted. */
+interface StoredMorphRow {
+  id: string;
+  scan_id: string;
+  status: string;
+  front_path: string | null;
+  side_path: string | null;
+  validation: { passed?: unknown } | null;
+  spec: { hasSide?: unknown; requestId?: unknown } | null;
+  created_at: string;
+  expires_at: string;
+  kept_until: string | null;
+}
+
+const RECOVERY_COLUMNS = "id,scan_id,status,front_path,side_path,validation,spec,created_at,expires_at,kept_until";
+const RECIPE_KEY = /^[a-f0-9]{64}$/;
+function unexpired(row: StoredMorphRow): boolean {
+  return Date.parse(row.kept_until ?? row.expires_at) > Date.now();
+}
+
+/** Read existing jobs only. Neither listing nor polling claims or creates a render. */
 export async function GET(request: Request): Promise<Response> {
   try {
     if (!requestOrigin(request)) return json({ error: "Cross-origin previews are not allowed." }, 403);
     const user = await authenticatedUser(request);
     if (!user) return json({ error: "Sign in to see your Goal preview." }, 401);
-    const id = new URL(request.url).searchParams.get("job") ?? "";
-    if (!isScanId(id)) return json({ status: "failed", error: "Not found." }, 404);
+    const access = await maxAccessForUser(user.id);
+    if (!access.ok) return json({ error: access.error }, access.status);
+    if (access.age < 18) return json({ error: "Goal preview is available from age 18." }, 403);
+    if (!(await consented(user.id))) return json({ error: "Choose Goal preview in Settings first." }, 403);
+    const params = new URL(request.url).searchParams;
+    const id = params.get("job") ?? "";
+    const scanId = params.get("scan") ?? "";
+    const recipeKey = params.get("recipe") ?? "";
+    const requestId = params.get("request") ?? "";
+    const matching = Boolean(scanId || recipeKey);
+    if ((matching && (!isScanId(scanId) || !RECIPE_KEY.test(recipeKey))) || (!id && !matching) || (id && !isScanId(id)) || (requestId && (!matching || !isScanId(requestId)))) {
+      return json({ status: "failed", error: "Not found." }, 404);
+    }
     const admin = getSupabaseAdmin();
+    if (!id) {
+      let query = admin.from("goal_previews")
+        .select(RECOVERY_COLUMNS).eq("user_id", user.id).eq("scan_id", scanId)
+        .eq("spec->>contract", "morph-preview-1").eq("catalogue_version", GOAL_CATALOGUE_VERSION)
+        .in("status", requestId ? ["generating", "ready", "failed", "rejected"] : ["generating", "ready"])
+        .order("created_at", { ascending: false }).limit(51);
+      if (requestId) query = query.eq("spec->>requestId", requestId);
+      const { data: rows, error: listError } = await query;
+      if (listError) throw new Error(listError.message);
+      // An incomplete search must never be mistaken for permission to buy a new render.
+      if ((rows?.length ?? 0) > 50) return json({ error: "The saved-preview search is incomplete. Manage older previews in Settings before trying again." }, 409);
+      const jobs = [];
+      for (const row of (rows ?? []) as StoredMorphRow[]) {
+        if (!isScanId(row.id) || !Number.isFinite(Date.parse(row.created_at)) || !Number.isFinite(Date.parse(row.kept_until ?? row.expires_at))
+          || await storedMorphRecipeKey(row.spec) !== recipeKey) continue;
+        const terminal = !unexpired(row) || row.validation?.passed === false || row.status === "failed" || row.status === "rejected";
+        if (terminal && !requestId) continue;
+        if (!terminal && row.status === "ready" && (row.front_path !== `${user.id}/${row.id}/front.jpg`
+          || (row.spec?.hasSide === true ? row.side_path !== `${user.id}/${row.id}/side.jpg` : Boolean(row.side_path)))) continue;
+        jobs.push({ jobId: row.id, status: terminal ? "failed" : row.status === "generating" ? "processing" : "ready",
+          createdAt: row.created_at, expiresAt: row.kept_until ?? row.expires_at });
+      }
+      return json({ scanId, recipeKey, ...(requestId ? { requestId } : {}), jobs });
+    }
     const { data, error } = await admin
       .from("goal_previews")
-      .select("id,status,front_path,side_path,validation")
+      .select(RECOVERY_COLUMNS)
       .eq("id", id)
       .eq("user_id", user.id)
-      .maybeSingle<{ id: string; status: string; front_path: string | null; side_path: string | null; validation: { passed?: unknown } | null }>();
+      .maybeSingle<StoredMorphRow>();
     if (error) throw new Error(error.message);
     if (!data) return json({ status: "failed", error: "Not found." }, 404);
+    const storedKey = await storedMorphRecipeKey(data.spec);
+    if (!storedKey || (matching && (data.scan_id !== scanId || storedKey !== recipeKey)) || (requestId && data.spec?.requestId !== requestId)) return json({ status: "failed", error: "Not found." }, 404);
+    if (!unexpired(data)) return json({ status: "failed", jobId: data.id, error: "This preview has expired. No image was loaded." });
+    if (data.validation?.passed === false) return json({ status: "failed", jobId: data.id, error: "The preview did not pass TrueMax validation." });
     if (data.status === "generating") return json({ status: "processing", jobId: data.id });
-    if (data.status !== "ready" || !data.front_path) return json({ status: "failed", jobId: data.id, error: "The preview did not pass TrueMax validation." });
+    if (data.status !== "ready" || !data.front_path || (data.spec?.hasSide === true && !data.side_path)) return json({ status: "failed", jobId: data.id, error: "The preview did not pass TrueMax validation." });
+    if (data.front_path !== `${user.id}/${data.id}/front.jpg` || (data.side_path && (data.spec?.hasSide !== true || data.side_path !== `${user.id}/${data.id}/side.jpg`))) {
+      return json({ status: "failed", jobId: data.id, error: "The preview could not be loaded safely." });
+    }
     const storage = admin.storage.from(GOAL_PREVIEW_BUCKET);
     const front = await storage.download(data.front_path);
     const side = data.side_path ? await storage.download(data.side_path) : null;

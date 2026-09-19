@@ -11,17 +11,24 @@ const section = (start: string, end: string): string => {
 };
 
 test("late onboarding reads must still own both the scan generation and account before publishing profile data", () => {
-  const source = section("async function ensureOnboarded", "async function requirePaidMaxBodyProfile");
-  assert.match(source, /const ownsProfile = \(\) => generation === scanGeneration && activeScanOwner\(\) === `user:\$\{user\.id\}`/);
-  assert.match(source, /await flushPendingProfile\(user\)\.catch\(\(\) => undefined\);\s*if \(!ownsProfile\(\)\) return/);
+  const source = section("async function refreshKnownOnboardingProfile", "onOnboardingProfileSaved(async");
   const read = source.indexOf("await loadOnboardingProfile(user)");
   const guard = source.indexOf("if (!ownsProfile()) return", read);
   assert.ok(read >= 0 && guard > read);
-  for (const mutation of ["knownAdult =", "knownFirstName =", "knownProfileOwner =", "setAdult(", "setBirthDate(", "openTrialFunnel("]) {
+  for (const mutation of ["knownAdult =", "knownFirstName =", "knownProfileOwner =", "setAdult(", "setBirthDate("]) {
     assert.ok(source.indexOf(mutation) > guard, `${mutation} must follow the post-read owner check`);
   }
   assert.match(source, /knownFirstName = profile\.firstName\?\.trim\(\) \|\| null;\s*knownProfileOwner = user\.id;\s*syncLandingHeadline\(displayName\(user\)\)/);
   assert.doesNotMatch(source, /user_metadata/);
+});
+
+test("saved quiz and Settings profiles refresh the current account, and startup waits for quiz dismissal", () => {
+  const source = section("onOnboardingProfileSaved(async", "async function requirePaidMaxBodyProfile");
+  assert.match(source, /const ownsProfile = \(\) => generation === scanGeneration && activeScanOwner\(\) === `user:\$\{user\.id\}`/);
+  assert.match(source, /await refreshKnownOnboardingProfile\(user, ownsProfile\)/);
+  assert.match(source, /await flushPendingProfile\(user\)\.catch\(\(\) => undefined\);\s*if \(!ownsProfile\(\)\) return/);
+  const quiz = source.indexOf("await openTrialFunnel(user");
+  assert.ok(quiz >= 0 && source.indexOf("await refreshKnownOnboardingProfile(user, ownsProfile)", quiz) > quiz);
 });
 
 test("canonical greeting names are reusable only for their owner, with a safe metadata or generic fallback", () => {

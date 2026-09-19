@@ -1,0 +1,38 @@
+.max-routine-picker {
+  box-sizing: border-box;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: clamp(20px, 4vw, 32px);
+  border: 1px solid #deded8;
+  border-radius: 24px;
+  color: #191c1b;
+  background: #fafaf7;
+}
+.max-routine-picker::backdrop { background: rgb(16 24 23 / 48%); }
+.max-routine-picker h2 { margin: 0 0 12px; font-size: 26px; }
+.max-routine-picker p { font-size: 14px; line-height: 1.5; }
+.max-routine-options { display: grid; gap: 12px; margin: 20px 0; }
+.max-routine-options label { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border: 1px solid #ddd; border-radius: 14px; cursor: pointer; }
+.max-routine-options input { width: 20px; height: 20px; flex: 0 0 20px; margin: 2px 0; accent-color: #147c69; }
+.max-routine-options b, .max-routine-options small { display: block; }
+.max-routine-options small { margin-top: 6px; line-height: 1.4; }
+.max-routine-product { display: inline-flex; align-items: center; min-height: 44px; color: #126d5d; text-decoration: underline; font-size: 14px; }
+.max-routine-picker footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+.max-routine-picker button { min-height: 44px; padding: 10px 16px; border: 1px solid #d5d7d2; border-radius: 12px; background: #fff; color: inherit; cursor: pointer; font: inherit; }
+.max-routine-picker [data-save] { background: #147c69; color: #fff; }
+.max-routine-picker button:disabled { opacity: .5; cursor: default; }
+.maxchat-privacy { font-size: 11px; line-height: 1.4; color: #666; margin: 0; padding: 6px 16px 12px; }
+.max-plan-goals { border: 0; padding: 0; margin: 24px 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.max-plan-goals legend { margin-bottom: 12px; font-weight: 600; }
+.max-plan-goals label { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid #d5d7d2; border-radius: 12px; cursor: pointer; }
+.max-plan-goals label:has(input:checked) { border-color: #147c69; background: #e8f3ef; }
+.max-plan-goals input { accent-color: #147c69; }
+.max-plan-field { display: block; margin: 18px 0; font-weight: 600; }
+.max-plan-field small { font-weight: 400; color: #666; }
+.max-plan-field textarea { box-sizing: border-box; display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid #d5d7d2; border-radius: 12px; resize: vertical; font: inherit; font-size: 16px; font-weight: 400; background: #fff; color: inherit; }
+.max-plan-privacy { color: #666; }
+.max-plan-existing { padding: 12px; border-radius: 12px; background: #e8f3ef; }
+.maxtab-plan-actions { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 20px; }
+.maxtab-plan-actions button { min-height: 44px; border-radius: 14px; padding: 12px 20px; }
+@media (max-width: 440px) { .max-plan-brief footer button { flex: 1 1 auto; } }

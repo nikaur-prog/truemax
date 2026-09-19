@@ -7,6 +7,21 @@ import { RECS, buyGuideFor, productSearchUrl } from "./recommendations.js";
 
 const topicals = RECS.filter((r) => r.group === "topical");
 
+test("the benzoyl peroxide example names a real matching strength and formulation", () => {
+  const rec = RECS.find((r) => r.id === "benzoyl-peroxide")!;
+  const guide = buyGuideFor(rec)!;
+  assert.match(guide.example, /Benzac AC Mild Strength 2\.5% Acne Gel/);
+  assert.match(guide.where, /differ by country/);
+  assert.doesNotMatch(Object.values(guide).join(" "), /PanOxyl 2\.5%|everywhere|without working better/);
+  assert.equal(rec.guardian, true);
+});
+
+test("buying guides do not dismiss rinse-off salicylic formulations as ineffective", () => {
+  const guide = buyGuideFor(RECS.find((r) => r.id === "salicylic")!)!;
+  assert.doesNotMatch(guide.where, /rinses off before it works/);
+  assert.match(guide.where, /follow the directions/i);
+});
+
 test("every topical we say works names what to buy", () => {
   // The whole point of the step. A recommendation that ends at a search box
   // hands the person back the problem they came with.

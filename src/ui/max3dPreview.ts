@@ -15,7 +15,7 @@ export function mountMax3DPreview(container: HTMLElement = document.body): () =>
     [data-max-state]:focus-visible{outline:3px solid #2a947c;outline-offset:2px}
     @media(max-width:650px){[data-max-workbench]{grid-template-columns:minmax(0,1fr);gap:4px}}
   </style><h1 style="margin:0 0 8px;font-size:clamp(24px,4vw,36px)">Max, with a little more life</h1>
-    <p>The original Max face on a round 3D body. Try a gesture, an expression or a five-second prop routine. This is a local prototype, not a replacement for the live scan character yet.</p>
+    <p>The original Max face on a round 3D body, now used in Coach and the Max chat. Try a gesture, an expression or a five-second prop routine. Small scan and report icons stay lightweight.</p>
     <div data-max-workbench>
     <div data-max-preview-stage style="display:block;position:relative;width:min(100%,420px);aspect-ratio:1;margin:12px auto;background:radial-gradient(ellipse at center,#fff,#e1ebf4);border-radius:28px">
       ${maxCharacterMarkup()}

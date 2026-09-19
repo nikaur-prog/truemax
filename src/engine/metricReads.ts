@@ -46,8 +46,8 @@ const READS: Record<string, Read> = {
     low: "the eye line runs flatter than average, or tips down at the outer corner, which can read tired even when you are not",
   },
   eyeAspectRatio: {
-    high: "the aperture is on the rounder, more open side: softer and more expressive than the narrow cut",
-    low: "the aperture is narrower than average: the compressed, intense look people call hooded or deep-set",
+    high: "the visible eye opening is taller relative to its width in this photo",
+    low: "the visible eye opening is shorter relative to its width in this photo; this ratio does not measure hooding or eye depth",
   },
   eyeSeparationRatio: {
     high: "the eyes sit wide across the face, which opens the midface up",
@@ -84,8 +84,8 @@ const READS: Record<string, Read> = {
     low: "the jaw is narrow against the cheekbones, tapering the face toward the chin",
   },
   gonialProxy: {
-    high: "seen from the front, the jaw turns its corner gradually: a softer angle into the neck",
-    low: "the jaw turns a sharp visible corner: the angular hinge that defines the lower face",
+    high: "the front-view jaw outline forms a more open corner between the measured points; this is not the side-profile gonial angle",
+    low: "the front-view jaw outline forms a tighter corner between the measured points; this is not the side-profile gonial angle",
   },
   jawFrontalAngle: {
     high: "the jaw base spreads wide from the chin: the flatter, squarer base",
@@ -144,8 +144,8 @@ const READS: Record<string, Read> = {
     low: "the forehead is short, bringing the hairline down toward the brows",
   },
   topThirdEst: {
-    high: "the forehead takes more than a third of the face's height",
-    low: "the forehead takes less than its third: the low-hairline balance",
+    high: "the span above the brow is larger than the reference for this mesh estimate; the top point is not the hairline",
+    low: "the span above the brow is smaller than the reference for this mesh estimate; it does not establish a low hairline",
   },
   middleLowerBalance: {
     high: "the midface is long against the lower face: weight in the middle of the face",

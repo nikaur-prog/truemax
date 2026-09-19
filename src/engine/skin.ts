@@ -1,4 +1,4 @@
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { FACE_CONNECTIONS } from "./faceConnections.js";
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 
 // ---------------------------------------------------------------------------
@@ -90,12 +90,12 @@ let RINGS: { oval: number[]; eyeL: number[]; eyeR: number[]; lips: number[]; bro
   null;
 function rings() {
   return (RINGS ??= {
-    oval: ring([...FaceLandmarker.FACE_LANDMARKS_FACE_OVAL]),
-    eyeL: ring([...FaceLandmarker.FACE_LANDMARKS_LEFT_EYE]),
-    eyeR: ring([...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE]),
-    lips: ring([...FaceLandmarker.FACE_LANDMARKS_LIPS]),
-    browL: ring([...FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW]),
-    browR: ring([...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW]),
+    oval: ring([...FACE_CONNECTIONS.FACE_LANDMARKS_FACE_OVAL]),
+    eyeL: ring([...FACE_CONNECTIONS.FACE_LANDMARKS_LEFT_EYE]),
+    eyeR: ring([...FACE_CONNECTIONS.FACE_LANDMARKS_RIGHT_EYE]),
+    lips: ring([...FACE_CONNECTIONS.FACE_LANDMARKS_LIPS]),
+    browL: ring([...FACE_CONNECTIONS.FACE_LANDMARKS_LEFT_EYEBROW]),
+    browR: ring([...FACE_CONNECTIONS.FACE_LANDMARKS_RIGHT_EYEBROW]),
   });
 }
 

@@ -27,36 +27,10 @@ const MAX_CHIPS = 3;
 // Openers, before anything has been said. Broad on purpose: at this point the
 // only thing known about the reader is that they have a scan and no question.
 export const OPENING_SUGGESTIONS = [
-  "What's strong and what needs work?",
-  "What should I do first?",
+  "Help me understand my results.",
+  "What should I focus on first?",
   "Create a plan for me.",
 ];
-
-// The leading noun of a focus entry — "Nose : intercanthal width, currently
-// 1.31, essentially fixed..." becomes "Nose : intercanthal width". The focus
-// strings are built in maxContext.ts as `${name}, currently ...`, so the split
-// is on the first comma and nothing else depends on the tail.
-function focusName(entry: string | undefined): string | null {
-  if (!entry) return null;
-  const name = entry.split(",")[0]?.trim();
-  return name ? name : null;
-}
-
-function lowestRegion(context: MaxChatContext | null): string | null {
-  let worst: { label: string; percentile: number } | null = null;
-  for (const r of context?.regions ?? []) {
-    if (!worst || r.percentile < worst.percentile) worst = r;
-  }
-  return worst ? worst.label : null;
-}
-
-function bestRegion(context: MaxChatContext | null): string | null {
-  let best: { label: string; percentile: number } | null = null;
-  for (const r of context?.regions ?? []) {
-    if (!best || r.percentile > best.percentile) best = r;
-  }
-  return best ? best.label : null;
-}
 
 // Did Max end on an offer? Models like to close with one, and "yes" is by far
 // the most likely next message — it should not require typing it.
@@ -92,6 +66,8 @@ export function suggestFollowUps(
   };
 
   const said = reply.toLowerCase();
+  // Do not put an appearance optimisation menu beneath a crisis response.
+  if (/\b(?:crisis|suicid|emergency services|hurt yourself|harm yourself|immediate danger)/i.test(said)) return [];
 
   // 1. The thread Max himself opened. An unanswered offer outranks anything
   //    computed from the scan, because it is the only chip that continues the
@@ -103,24 +79,23 @@ export function suggestFollowUps(
   else if (/\bsurgery|surgical|procedure\b/.test(said)) push("What can I do without surgery?");
   else if (/\blighting|angle|camera|photo\b/.test(said)) push("How should I shoot the next one?");
 
-  if (/\bweeks?\b|\bmonths?\b|\btime\b/.test(said)) push("How long until it shows on a rescan?");
+  if (/\bweeks?\b|\bmonths?\b|\btime\b/.test(said)) push("When should we review whether this helps?");
 
-  // 3. The scan. The weakest measurement is what people came to ask about,
-  //    and the strongest region is the question nobody thinks to ask and
-  //    everybody wants answered.
-  const weakest = focusName(context?.focus[0]);
-  if (weakest && !said.includes(weakest.toLowerCase())) push(`Why is ${weakest.toLowerCase()} low?`);
-
-  const low = lowestRegion(context);
-  if (low) push(`Which measurements lower my ${low.toLowerCase()}?`);
-
-  const high = bestRegion(context);
-  if (high) push(`What is my ${high.toLowerCase()} doing right?`);
+  // 3. Continue their chosen goal or existing routine. A low score is not an
+  // invitation to volunteer criticism of a region they asked us to leave alone.
+  if (context?.coaching?.routines.some((routine) => routine.status === "running")) {
+    push("How should I review my current routine?");
+  }
+  if (context?.coaching?.goals.length || context?.coaching?.endGoal) {
+    push("Which action best fits the goal I chose?");
+  }
+  if (context?.measurements.length) push("How reliable are these measurements?");
 
   // 4. Generic backstops, so the row is never short on a terse answer.
-  push("What would move my score the most?");
-  push("Is that my face or the photograph?");
+  push("What should I focus on first?");
+  if (context) push("Could the photograph affect this result?");
   push("Create a plan for me.");
+  push("Help me choose a manageable routine.");
 
   return out.slice(0, MAX_CHIPS);
 }

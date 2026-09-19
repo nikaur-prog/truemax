@@ -25,6 +25,7 @@ import {
 } from "./earnings.js";
 import { campaignTag, DEFAULT_CAMPAIGN_TAG } from "./compliance.js";
 import { payoutSetupAudience, staffPayoutSetupHTML } from "./payoutSetup.js";
+import { leagueEntry } from "./dashboardAccess.js";
 
 // ---------------------------------------------------------------------------
 // The TrueMax Creator League — /league.
@@ -1605,9 +1606,9 @@ const PAGES: Record<Page, (mount: HTMLElement, me: CreatorRow) => Promise<void> 
       ${me.owner ? `<div class="lg-card lg-tool">
         <div class="lg-tool-kicker">08</div>
         <div class="lg-row" style="border:none;padding:0">
-          <div><h3>Calibration</h3><p class="lg-sub" style="margin:4px 0 6px">Rate a face before
-          seeing the engine result, then audit the disagreement and corpus coverage.</p>
-          <p class="lg-note" style="margin:0">Owner only · this changes how future scoring is validated</p></div>
+          <div><h3>Calibration</h3><p class="lg-sub" style="margin:4px 0 6px">Upload front and side photos,
+          correct suggested side points, then export the measurements for comparison.</p>
+          <p class="lg-note" style="margin:0">Owner admin only · ratings optional · does not change live scores</p></div>
           <a class="lg-btn pri" href="/league/tools#calibrate">Open</a>
         </div></div>` : ""}
       </div>`;
@@ -2188,22 +2189,22 @@ async function boot(): Promise<void> {
   const client = await getSupabaseClient();
   const [{ data: me }, { data: staffRow }] = await Promise.all([
     client.from("league_creators").select("*").eq("user_id", user.id).maybeSingle(),
-    client.from("app_admins").select("user_id,note").maybeSingle<{ user_id: string; note: string | null }>(),
+    client.from("app_admins").select("user_id,note").eq("user_id", user.id).maybeSingle<{ user_id: string; note: string | null }>(),
   ]);
   const staff = Boolean(staffRow);
   const owner = staffRow?.note?.trim().toLowerCase() === "owner";
   const row = me as CreatorRow | null;
-  if (!row) {
-    // Staff without a creator row still gets the dashboard — the founder needs
-    // Admin without applying to their own league.
-    if (staff) {
-      return renderDash(
-        { user_id: user.id, handle: owner ? "owner" : "staff", display_name: owner ? "Owner" : "Staff", niche: null, status: "approved", pillar_grants: { cta: true, clips: true, polisher: true, studio: true }, monthly_render_quota: 9999, synthetic_staff: true, owner },
-        true,
-      );
-    }
-    return renderApply();
+  const entry = leagueEntry(staff, row?.status ?? null);
+  // A pending or paused creator application cannot override a separate admin
+  // grant. Use the staff dashboard without changing that application's status
+  // or pretending the account is approved for creator payouts.
+  if (entry === "staff") {
+    return renderDash(
+      { user_id: user.id, handle: owner ? "owner" : "staff", display_name: owner ? "Owner" : "Staff", niche: null, status: "approved", pillar_grants: { cta: true, clips: true, polisher: true, studio: true }, monthly_render_quota: 9999, synthetic_staff: true, owner },
+      true,
+    );
   }
+  if (!row) return renderApply();
   if (row.status !== "approved") return renderStatus(row);
   return renderDash({ ...row, owner }, staff);
 }

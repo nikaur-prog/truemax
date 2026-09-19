@@ -129,6 +129,11 @@ export function createSideFeedbackSubmitter(dependencies: SideFeedbackUploadDepe
     intent: SideFeedbackIntent,
     options: SideFeedbackSubmitOptions = {},
   ): Promise<SideFeedbackSubmitResult> {
+    // Old queued intents remain readable, but cannot silently acquire the new
+    // subject declaration. Public sharing and guest scans never imply consent.
+    if (intent.subjectConfirmation !== "my-own-adult-face") {
+      return { ok: false, message: "Only an adult's own face can be contributed with their explicit permission." };
+    }
     const owner = dependencies.owner();
     const current = () => !!owner?.startsWith("user:") && dependencies.owner() === owner && !options.signal?.aborted;
     const cancelled = () => ({ ok: false, message: "Feedback was not sent because the scan or account changed." });
@@ -146,6 +151,7 @@ export function createSideFeedbackSubmitter(dependencies: SideFeedbackUploadDepe
         automaticPoints: cloneSidePoints(intent.automaticPoints),
         correctedPoints: cloneSidePoints(correctedPoints),
         review: intent.review ? { ...intent.review } : undefined,
+        subjectConfirmation: intent.subjectConfirmation,
       };
       const token = await dependencies.token(owner!.slice("user:".length));
       if (!current()) return cancelled();

@@ -13,6 +13,8 @@
 // buffers. It lives only for the mounted report and is never uploaded.
 // ---------------------------------------------------------------------------
 
+import { isAppForeground, subscribeNativeActivity } from "../engine/nativeBridge.js";
+
 const MAX_EDGE = 1_600;
 const JPEG_QUALITY = 0.9;
 
@@ -62,7 +64,7 @@ function encode(canvas: HTMLCanvasElement): Promise<Blob | null> {
   }
 }
 
-function drawBlob(target: HTMLCanvasElement, blob: Blob, width: number, height: number): Promise<boolean> {
+function drawBlob(target: HTMLCanvasElement, blob: Blob, width: number, height: number, canDraw: () => boolean): Promise<boolean> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
     const image = new Image();
@@ -72,6 +74,8 @@ function drawBlob(target: HTMLCanvasElement, blob: Blob, width: number, height: 
     };
     image.onload = () => {
       try {
+        // Decoding can outlive this report or a second background transition.
+        if (!canDraw()) return finish(false);
         // Preserve the capture's intrinsic dimensions. Overlay recipes and
         // side points use this coordinate space even though the encoded copy
         // itself may have been scaled down before compression.
@@ -116,18 +120,18 @@ export function mountCanvasRecovery(
   let running: Promise<boolean> | null = null;
 
   const restore = (): Promise<boolean> => {
-    if (dead || !snapshots.length) return Promise.resolve(false);
+    if (dead || !isAppForeground() || !snapshots.length) return Promise.resolve(false);
     if (running) return running;
     running = Promise.all(
       snapshots.map(async (snapshot) => {
         const blob = await snapshot.encoded;
-        if (dead || !blob) return false;
-        return drawBlob(snapshot.canvas, blob, snapshot.width, snapshot.height);
+        if (dead || !isAppForeground() || !blob) return false;
+        return drawBlob(snapshot.canvas, blob, snapshot.width, snapshot.height, () => !dead && isAppForeground());
       }),
     )
       .then((results) => {
         const restored = results.some(Boolean);
-        if (!dead && restored) onRestore();
+        if (!dead && isAppForeground() && restored) onRestore();
         return restored;
       })
       .finally(() => {
@@ -137,15 +141,18 @@ export function mountCanvasRecovery(
   };
 
   const onVisibility = () => {
-    if (!document.hidden) void restore();
+    if (isAppForeground()) void restore();
   };
-  const onPageShow = () => void restore();
+  const onPageShow = () => { if (isAppForeground()) void restore(); };
   // A focus event can arrive while the document is still hidden during an
   // app-switch transition. Waiting for visibilitychange avoids decoding and
   // repainting into a background page for no user-visible benefit.
   const onFocus = () => {
-    if (!document.hidden) void restore();
+    if (isAppForeground()) void restore();
   };
+  const unsubscribeNative = subscribeNativeActivity((active) => {
+    if (active && isAppForeground()) void restore();
+  });
 
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("pageshow", onPageShow);
@@ -154,7 +161,9 @@ export function mountCanvasRecovery(
   return {
     restore,
     destroy() {
+      if (dead) return;
       dead = true;
+      unsubscribeNative();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("focus", onFocus);

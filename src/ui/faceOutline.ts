@@ -1,4 +1,4 @@
-import { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { FACE_CONNECTIONS } from "../engine/faceConnections.js";
 import { SHAPE_MODEL } from "../engine/shapeModel.js";
 import { shapeSubset } from "../engine/shape.js";
 import type { Sex } from "../engine/types.js";
@@ -12,12 +12,12 @@ import type { Sex } from "../engine/types.js";
 const IDEAL_SIGMA = 0.035;
 
 const EDGE_SETS = () => [
-  FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
-  FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
-  FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
-  FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
-  FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
-  FaceLandmarker.FACE_LANDMARKS_LIPS,
+  FACE_CONNECTIONS.FACE_LANDMARKS_FACE_OVAL,
+  FACE_CONNECTIONS.FACE_LANDMARKS_LEFT_EYE,
+  FACE_CONNECTIONS.FACE_LANDMARKS_RIGHT_EYE,
+  FACE_CONNECTIONS.FACE_LANDMARKS_LEFT_EYEBROW,
+  FACE_CONNECTIONS.FACE_LANDMARKS_RIGHT_EYEBROW,
+  FACE_CONNECTIONS.FACE_LANDMARKS_LIPS,
 ];
 
 // A Procrustes mean carries whatever orientation its alignment reference
@@ -76,7 +76,7 @@ function ovalPairs(): Array<[number, number]> {
   const index = new Map(subset.map((id, i) => [id, i]));
 
   const next = new Map<number, number>();
-  for (const c of FaceLandmarker.FACE_LANDMARKS_FACE_OVAL) next.set(c.start, c.end);
+  for (const c of FACE_CONNECTIONS.FACE_LANDMARKS_FACE_OVAL) next.set(c.start, c.end);
   const ring: number[] = [];
   const seen = new Set<number>();
   let cur: number | undefined = next.keys().next().value;

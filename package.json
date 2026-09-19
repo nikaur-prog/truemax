@@ -8,6 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "tsx --test api/_*.test.ts src/engine/*.test.ts src/league/*.test.ts src/ui/*.test.ts",
     "preview": "vite preview",
+    "calibration:preview": "node tools/calibration-preview.mjs",
+    "test:calibration-preview": "node --test tools/calibration-preview.test.mjs",
     "postinstall": "node scripts/copy-wasm.mjs",
     "harvest": "node scripts/harvest-clips.mjs"
   },
@@ -27,7 +29,7 @@
     "@types/node": "^24.13.3",
     "@types/three": "0.185.4",
     "playwright": "^1.62.1",
-    "sharp": "^0.35.3",
+    "sharp": "0.35.4",
     "tsx": "^4.20.6",
     "typescript": "^5.5.0",
     "vite": "^8.2.2"

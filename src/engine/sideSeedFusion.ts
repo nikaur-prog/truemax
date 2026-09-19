@@ -1,12 +1,15 @@
 import { SIDE_POINTS } from "./sideMetrics.js";
 import type { SidePointId, SidePoints } from "./sideMetrics.js";
+import { parseSidePlacementEvidence } from "./sidePlacementEvidence.js";
+import type { SidePlacementEvidence } from "./sidePlacementEvidence.js";
 
 // ---------------------------------------------------------------------------
 // Two placements of the thirteen side points, one seed.
 //
-// The device seeder and the cloud pass are independent readers of the same
-// photograph. The seeder's eight outline points come from the face mesh and
-// are right to a few pixels; its five back points come from a silhouette and
+// The device seed and accepted cloud observations read the same photograph.
+// A seed-guided crop is not an independent reader, and a retained hint is not
+// an observation at all. The seeder's eight outline points come from the face mesh;
+// their real-photo error still needs evaluation. Its five back points come from a silhouette and
 // a template, and drift. The cloud pass reads all thirteen from the pixels
 // and, as of vision-2, matches the seeder on the ear notch, the neck point
 // and the chin front, and is worse on the jaw corner and the chin bottom
@@ -15,8 +18,8 @@ import type { SidePointId, SidePoints } from "./sideMetrics.js";
 // So the cloud result does not replace the seed. Each landmark takes the
 // reader the benchmark says to trust, the two ear points are averaged when
 // the readers agree, and the DISTANCE between the two readers becomes the
-// confidence the person sees: two independent methods landing on the same
-// pixel is the strongest evidence a placement can have without a human, and
+// internal confidence: agreement is supporting evidence, not proof of accuracy
+// or an independent validation label. In contrast,
 // two methods a third of a head apart is the plainest signal to look closely.
 //
 // Everything is in the photograph's pixel frame; thresholds are in head
@@ -61,7 +64,7 @@ export interface SeedFusionPolicy {
 // 0.107 vs 0.099) but not on the tail: the seeder's notch is more than 0.15
 // head widths off on 17 of 54 faces, up to 0.96, while the model's p90 is
 // 0.195 with no bias. So a small disagreement on the ear is averaged (two
-// similar independent errors cancel) and a large one goes to the model,
+// nearby predictions are blended) and a large one goes to the model,
 // because at that distance it is the seeder that is usually the one that
 // missed. The front eight are the mesh's. Revisit from the harness's
 // disagreement table and fused column, never by feel.
@@ -121,26 +124,31 @@ export function fuseSideSeeds(
   cloud: SidePoints | null,
   cloudConfidence?: Partial<Record<SidePointId, number>>,
   policy: SeedFusionPolicy = DEFAULT_SEED_FUSION_POLICY,
+  evidence?: SidePlacementEvidence,
 ): FusedSideSeed {
   const ids = SIDE_POINTS.map((p) => p.id);
   const points = {} as SidePoints;
   const source = {} as Record<SidePointId, SeedSource>;
   const agreement = {} as Record<SidePointId, number | null>;
   const band = {} as Record<SidePointId, ConfidenceBand>;
+  // Legacy responses without provenance fail closed during a mixed rollout.
+  const observed = parseSidePlacementEvidence(evidence);
 
   let unit = headWidth(device);
   if (!(unit > 1) && cloud) unit = headWidth(cloud);
   const usable = !!cloud && unit > 1;
+  let secondOpinion = false;
 
   for (const id of ids) {
     const d = device[id];
-    if (!usable) {
+    if (!usable || !observed || observed[id] === "seed") {
       points[id] = { x: d.x, y: d.y };
       source[id] = "device";
       agreement[id] = null;
       band[id] = BACK_SIDE_POINT_IDS.includes(id) ? "mid" : "high";
       continue;
     }
+    secondOpinion = true;
     const c = cloud![id];
     const distance = Math.hypot(d.x - c.x, d.y - c.y) / unit;
     agreement[id] = distance;
@@ -169,7 +177,7 @@ export function fuseSideSeeds(
   let overall: ConfidenceBand = "high";
   for (const id of BACK_SIDE_POINT_IDS) overall = worse(overall, band[id]);
 
-  return { points, source, agreement, band, overall, secondOpinion: usable, unit };
+  return { points, source, agreement, band, overall, secondOpinion, unit };
 }
 
 /** The wording the app shows beside a band. Plain, never a compliment. */

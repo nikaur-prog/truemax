@@ -55,6 +55,7 @@ type PlanTier = "starter" | "max";
 const MEASUREMENT_COUNT = METRICS.length + SIDE_METRICS.length;
 
 let host: HTMLDivElement | null = null;
+let resolveClosed: (() => void) | null = null;
 
 // ---------------------------------------------------------------------------
 // Monthly or yearly.
@@ -370,6 +371,9 @@ function close(): void {
   host = null;
   document.body.classList.remove("funnel-open");
   document.removeEventListener("keydown", onKey);
+  const finished = resolveClosed;
+  resolveClosed = null;
+  finished?.();
 }
 
 // Identity changes override the compulsory-question lock. Keeping a previous
@@ -439,6 +443,7 @@ export async function openTrialFunnel(
   const required = Boolean(options.required);
   const ceiling = options.ceiling ?? null;
   close();
+  const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
   const activeHost = document.createElement("div");
   host = activeHost;
   const alive = () => host === activeHost && activeHost.isConnected;
@@ -463,8 +468,13 @@ export async function openTrialFunnel(
       <button class="btn pri" id="trial-retry" type="button">Try again</button>
     </div>`;
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);
-    activeHost.querySelector("#trial-retry")?.addEventListener("click", () => void openTrialFunnel(user));
-    return;
+    activeHost.querySelector("#trial-retry")?.addEventListener("click", () => {
+      // A retry replaces the panel, but is still the same awaited setup flow.
+      const finished = resolveClosed;
+      resolveClosed = null;
+      void openTrialFunnel(user, preview, options).then(() => finished?.());
+    });
+    return closed;
   }
   if (!alive()) return;
 
@@ -713,13 +723,13 @@ export async function openTrialFunnel(
       </div>
       <div class="stat-band">
         <b><i class="stat-num" data-to="${MEASUREMENT_COUNT}">0</i> measurements</b>
-        <span>re-taken the same way every scan. One scan is a score; a run of them
-          is the only thing that can tell you a change was real and not the camera.</span>
+        <span>to compare over time. Consistent photos help, but lighting, pose
+          and point placement can still affect the result.</span>
       </div>
       ${
         ceiling
           ? `<div class="offer-ceiling">
-              <span class="offer-ceiling-h">WHERE YOUR SCAN SAYS YOU CAN GET TO</span>
+              <span class="offer-ceiling-h">A MODELLED SCORE SCENARIO</span>
               ${ceilingCtaMarkup(ceiling)}
             </div>`
           : ""
@@ -1193,6 +1203,9 @@ export async function openTrialFunnel(
     locked = false;
     await showSell();
   } else draw();
+  // Callers that continue with a dashboard or required body setup must wait
+  // until this quiz and its optional details/offer have actually closed.
+  return closed;
 }
 
 // Local visual QA only. Vite folds import.meta.env.DEV to false in production,

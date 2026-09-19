@@ -10,8 +10,23 @@ function fixture() {
   const intent = createSideFeedbackIntent(true, "a42ad7cd-2285-4f0a-82f8-f075588101f8", "b42ad7cd-2285-4f0a-82f8-f075588101f9", points, "mesh", undefined, {
     verificationAnswer: "no", finalPlacementVerified: false,
   })!;
+  intent.subjectConfirmation = "my-own-adult-face";
   return { points, intent, photo: { width: 400, height: 500 } as HTMLCanvasElement };
 }
+
+test("legacy or guest feedback intents never encode or upload without a fresh own-face declaration", async () => {
+  const sample = fixture();
+  delete sample.intent.subjectConfirmation;
+  let calls = 0;
+  const send = createSideFeedbackSubmitter({
+    owner: () => "user:alice",
+    token: async () => { calls++; return "test-token"; },
+    encode: async () => { calls++; return new Blob(["fixture"]); },
+    fetch: async () => { calls++; return Response.json({}); },
+  });
+  assert.equal((await send(sample.photo, sample.points, 1, sample.intent)).ok, false);
+  assert.equal(calls, 0);
+});
 
 test("feedback snapshots ownership before auth and never encodes anonymous or cancelled requests", async () => {
   let authCalls = 0;
@@ -81,6 +96,7 @@ test("retake during encoding prevents upload and successful uploads keep immutab
       assert.equal(options?.signal, next.signal);
       const metadata = JSON.parse((options?.body as FormData).get("metadata") as string);
       assert.equal(metadata.review.finalPlacementVerified, false);
+      assert.equal(metadata.subjectConfirmation, "my-own-adult-face");
       assert.equal(metadata.correctedPoints.gonion.x, 100);
       return Response.json({ submissionId: sample.intent.submissionId });
     },

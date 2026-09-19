@@ -1,6 +1,6 @@
 import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage } from "./_shared.js";
 import { maxAccessForUser } from "./_maxAccess.js";
-import { normalisePlanTitle } from "./_maxConversation.js";
+import { loadRoutineMemory, syncRoutineMemory } from "./_maxRoutineSync.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -18,10 +18,12 @@ export async function GET(request: Request): Promise<Response> {
       .from("max_plan_items")
       .select("id,title,category,status,notes,created_at,updated_at")
       .eq("user_id", user.id)
+      .not("normalized_title", "like", "protocol:%")
       .in("status", ["active", "paused", "not_working"])
       .order("updated_at", { ascending: false })
       .limit(40);
     if (planError) throw new Error(`Max plan memory is unavailable: ${planError.message}`);
+    const routines = await loadRoutineMemory(admin, user.id);
 
     if (id) {
       if (!UUID.test(id)) return json({ error: "That Max chat could not be found." }, 404);
@@ -42,7 +44,7 @@ export async function GET(request: Request): Promise<Response> {
         .order("id", { ascending: false })
         .limit(80);
       if (messagesError) throw new Error(`Max messages are unavailable: ${messagesError.message}`);
-      return json({ conversation, messages: [...(newestMessages ?? [])].reverse(), planItems: planItems ?? [] });
+      return json({ conversation, messages: [...(newestMessages ?? [])].reverse(), planItems: planItems ?? [], routines });
     }
 
     const { data: conversations, error: conversationsError } = await admin
@@ -54,7 +56,7 @@ export async function GET(request: Request): Promise<Response> {
       .order("id", { ascending: false })
       .limit(50);
     if (conversationsError) throw new Error(`Max chats are unavailable: ${conversationsError.message}`);
-    return json({ conversations: conversations ?? [], planItems: planItems ?? [] });
+    return json({ conversations: conversations ?? [], planItems: planItems ?? [], routines });
   } catch (error) {
     console.error("max-conversations", safeMessage(error));
     return json({ error: "Your Max chats are not available right now." }, 503);
@@ -69,31 +71,8 @@ export async function POST(request: Request): Promise<Response> {
     const access = await maxAccessForUser(user.id);
     if (!access.ok) return json({ error: access.error, upgrade: access.upgrade }, access.status);
     const body = await request.json().catch(() => null) as { items?: unknown } | null;
-    const raw = Array.isArray(body?.items) ? body.items.slice(0, 40) : [];
-    const now = new Date().toISOString();
-    const items = raw.flatMap((value) => {
-      if (!value || typeof value !== "object") return [];
-      const item = value as Record<string, unknown>;
-      const title = typeof item.title === "string"
-        ? item.title.replace(/[<>\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120).trim()
-        : "";
-      const normalizedTitle = normalisePlanTitle(title);
-      if (title.length < 2 || !normalizedTitle) return [];
-      return [{
-        user_id: user.id,
-        title,
-        normalized_title: normalizedTitle,
-        category: "other",
-        status: "active",
-        updated_at: now,
-      }];
-    });
-    if (items.length) {
-      const { error } = await getSupabaseAdmin().from("max_plan_items")
-        .upsert(items, { onConflict: "user_id,normalized_title", ignoreDuplicates: true });
-      if (error) throw new Error(`Max plan sync failed: ${error.message}`);
-    }
-    return json({ synced: items.length });
+    const synced = await syncRoutineMemory(getSupabaseAdmin(), user.id, body?.items);
+    return json({ synced: synced.length, routines: synced });
   } catch (error) {
     console.error("max-conversations sync", safeMessage(error));
     return json({ error: "Your Max plan could not be synced right now." }, 503);

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { corpusJSON, measurementsOf, setHealth, splitByProvenance } from "./calibrationSet.js";
+import { corpusJSON, measurementsOf, missingCoverage, setHealth, sideCount, splitByProvenance } from "./calibrationSet.js";
+import { METRICS } from "./metrics.js";
+import { SIDE_METRICS } from "./sideMetrics.js";
 import type { RatedFace } from "./calibrationSet.js";
 import type { Report } from "./types.js";
 
@@ -63,6 +65,45 @@ const face = (id: string, ratedBy?: RatedFace["ratedBy"]): RatedFace => ({
   scored: 5.5,
   ...(ratedBy ? { ratedBy } : {}),
   measurements: { fwhr: 1.97 },
+});
+
+test("coverage checks use the separate front and scored-side catalogues", () => {
+  assert.deepEqual(missingCoverage([], "front"), METRICS.map((metric) => metric.id));
+  assert.deepEqual(missingCoverage([], "side"), SIDE_METRICS.map((metric) => metric.id));
+  assert.ok(missingCoverage([], "side").includes("gonialAngle"));
+  const front = face("m1", "self");
+  const paired = { ...face("m2", "self"), measurements: { fwhr: 1.9, gonialAngle: 120, chinRecession: 12 } };
+  assert.equal(sideCount([front, paired]), 1, "one paired face is counted once, not once per metric");
+  assert.ok(!missingCoverage([paired], "front").includes("fwhr"));
+  assert.ok(!missingCoverage([paired], "side").includes("gonialAngle"));
+  assert.ok(missingCoverage([paired], "side").includes("nasofrontalAngle"));
+  const complete = { ...paired, measurements: Object.fromEntries(SIDE_METRICS.map((metric) => [metric.id, 1])) };
+  assert.deepEqual(missingCoverage([complete], "side"), []);
+  assert.equal(sideCount([complete]), 1);
+});
+
+test("invalid values and held-out experimental metrics do not claim scored-side coverage", () => {
+  const invalid = { ...face("m1", "self"), measurements: { gonialAngle: Number.NaN, chinRecession: Infinity, ramusMandible: 0.7 } };
+  assert.equal(sideCount([invalid]), 0);
+  assert.deepEqual(missingCoverage([invalid], "side"), SIDE_METRICS.map((metric) => metric.id));
+  assert.ok(!missingCoverage([], "side").includes("ramusMandible"));
+  const zero = { ...invalid, measurements: { chinRecession: 0 } };
+  assert.equal(sideCount([zero]), 1, "a finite zero is a measured value");
+});
+
+test("meeting the per-group collection target never claims validated scoring or fit readiness", () => {
+  const collected = Array.from({ length: 25 }, (_, index): RatedFace => ({
+    ...face(`m${index + 1}`, "self"), rating: index === 0 ? 3 : 7,
+  }));
+  const health = setHealth(collected, "male");
+  assert.equal(health.enough, true);
+  assert.equal(health.count, 25);
+  assert.equal(health.spread, 4);
+  assert.match(health.note, /pilot collection target met/);
+  assert.match(health.note, /independent validation still needed/);
+  assert.doesNotMatch(health.note, /enough to fit|validated|ready to fit/i);
+  assert.equal(setHealth(collected.slice(1), "male").enough, false);
+  assert.equal(setHealth(collected, "female").enough, false);
 });
 
 test("a borrowed rating never reaches the corpus export", () => {

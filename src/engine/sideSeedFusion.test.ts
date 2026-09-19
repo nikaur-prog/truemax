@@ -7,9 +7,14 @@ import {
   CONFIDENCE_BAND_LABEL,
   DEFAULT_SEED_FUSION_POLICY,
   FRONT_SIDE_POINT_IDS,
-  fuseSideSeeds,
+  fuseSideSeeds as fuse,
   headWidth,
 } from "./sideSeedFusion.js";
+import { sidePlacementEvidence } from "./sidePlacementEvidence.js";
+
+// Existing policy cases describe accepted whole-frame observations.
+const fuseSideSeeds = (...args: Parameters<typeof fuse>) =>
+  fuse(args[0], args[1], args[2], args[3], args[4] ?? sidePlacementEvidence("whole"));
 
 // A right-facing profile in a 640 by 850 frame; head width about 210 px.
 function device(): SidePoints {
@@ -140,4 +145,30 @@ test("the labels are plain readings, no em dash, no compliment", () => {
     assert.doesNotMatch(label, /—/);
     assert.match(label, /confidence$/);
   }
+});
+
+test("retained hints and legacy responses cannot corroborate themselves", () => {
+  for (const evidence of [undefined, sidePlacementEvidence("seed")]) {
+    const fused = fuse(device(), device(), undefined, undefined, evidence);
+    assert.equal(fused.secondOpinion, false);
+    assert.equal(fused.overall, "mid");
+    for (const { id } of SIDE_POINTS) {
+      assert.equal(fused.agreement[id], null, id);
+      assert.equal(fused.source[id], "device", id);
+    }
+  }
+});
+
+test("a partial read only contributes evidence on its observed landmarks", () => {
+  const evidence = { ...sidePlacementEvidence("seed"), tragion: "coarse" as const };
+  const d = device();
+  const cloud = shifted(d, { tragion: { dx: 6, dy: 0 }, condylion: { dx: 90, dy: 0 } });
+  const fused = fuse(d, cloud, undefined, undefined, evidence);
+  assert.equal(fused.secondOpinion, true);
+  assert.equal(fused.source.tragion, "blend");
+  assert.equal(fused.points.tragion.x, d.tragion.x + 3);
+  assert.deepEqual(fused.points.condylion, d.condylion, "inherited coordinates cannot override the device");
+  assert.equal(fused.agreement.condylion, null);
+  assert.equal(fused.band.condylion, "mid");
+  assert.equal(fused.overall, "mid", "one observed landmark cannot certify the whole profile");
 });

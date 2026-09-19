@@ -1,5 +1,6 @@
 /** Small lazy entry point. No renderer or asset is imported on the scan path. */
 import { MAX_3D_STATES, normalizeMaxSpeechLevel } from "./max3dSchedule.js";
+import { isAppForeground, subscribeNativeActivity } from "../engine/nativeBridge.js";
 import type { Max3DState } from "./max3dSchedule.js";
 export { MAX_3D_STATES };
 export type { Max3DState };
@@ -32,7 +33,9 @@ export function createMax3DMounter(load: () => Promise<RuntimeModule>) {
   let dead = false;
   let visible = false;
   let state = initial;
-  let view: Max3DView = "three-quarter";
+  // Coach and chat address the user directly. Alternate inspection angles are
+  // still opt-in through setView, but must not leak out of the preview surface.
+  let view: Max3DView = "front";
   let playful = options.playful !== false;
   let speechLevel: number | null = null;
   let loading = false;
@@ -41,7 +44,7 @@ export function createMax3DMounter(load: () => Promise<RuntimeModule>) {
   const abort = new AbortController();
   const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const connection = (navigator as Navigator & { connection?: EventTarget & { saveData?: boolean } }).connection;
-  const allowed = (): boolean => !dead && stage.isConnected && visible && !document.hidden && !motion.matches && !connection?.saveData;
+  const allowed = (): boolean => !dead && stage.isConnected && visible && !document.hidden && isAppForeground() && !motion.matches && !connection?.saveData;
   const sync = (): void => {
     renderer?.pause(!allowed());
     if (!allowed() || loading || failed || renderer) return;
@@ -86,6 +89,7 @@ export function createMax3DMounter(load: () => Promise<RuntimeModule>) {
   const size = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(sync);
   size?.observe(stage);
   document.addEventListener("visibilitychange", sync);
+  const stopNativeActivity = subscribeNativeActivity(sync);
   motion.addEventListener("change", sync);
   connection?.addEventListener("change", sync);
   // A detached surface must not retain a context if a caller misses teardown.
@@ -97,6 +101,7 @@ export function createMax3DMounter(load: () => Promise<RuntimeModule>) {
     abort.abort();
     observer?.disconnect(); size?.disconnect(); removal.disconnect();
     document.removeEventListener("visibilitychange", sync);
+    stopNativeActivity();
     motion.removeEventListener("change", sync);
     connection?.removeEventListener("change", sync);
     if (!observer) {

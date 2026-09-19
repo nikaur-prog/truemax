@@ -1,0 +1,11 @@
+/* The approved original art remains visible until a successful 3D frame. */
+.max-avatar-3d { position: relative; aspect-ratio: 1; isolation: isolate; }
+.max-avatar-3d > .mx-svg { display: block; width: 100%; height: 100%; }
+/* No second animation engine behind the WebGL canvas or on reduced motion. */
+.max-avatar-3d > .mx-svg,
+.max-avatar-3d > .mx-svg * { animation: none !important; transition: none !important; }
+.maxchat-face.max-avatar-3d { width: 96px; height: 96px; flex: 0 0 96px; cursor: default; }
+.maxtab-stage .maxtab-face.max-avatar-3d { width: 144px; height: 144px; cursor: default; }
+@media (max-width: 600px) {
+  .maxchat-face.max-avatar-3d { width: 88px; height: 88px; flex-basis: 88px; }
+}

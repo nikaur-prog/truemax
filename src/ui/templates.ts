@@ -6,6 +6,7 @@ import { rarityPhrase } from "../engine/rarity.js";
 import type { AdviceChannel } from "../engine/goals.js";
 import { DISPLAY_NOISE } from "../engine/history.js";
 import type { ScanDelta } from "../engine/history.js";
+import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 
 // Deterministic explanation engine. No LLM, no randomness: banded templates
 // with the actual computed numbers interpolated in. Every sentence must
@@ -17,13 +18,13 @@ import type { ScanDelta } from "../engine/history.js";
 // a few were clauses rather than phrases and why the summaries were stitched
 // together with dashes end to end.
 const TRAITS: Record<string, string> = {
-  canthalTilt: "eye-corner tilt, where a positive angle reads alert and structurally dimorphic",
-  eyeAspectRatio: "aperture shape, where narrower reads intense and rounder reads softer",
+  canthalTilt: "the angle between the inner and outer eye corners",
+  eyeAspectRatio: "the height of the visible eye opening relative to its width",
   eyeSeparationRatio: "how the eyes sit across the face's width",
   intercanthalEyeWidth: "eye spacing, counted in eye-widths",
-  browPosition: "brow height, where low-set brows harden the whole upper third",
+  browPosition: "brow height relative to the eyes",
   browTilt: "the rise of the brow from inner to outer end",
-  fwhr: "upper-face width against height, a core dominance signal",
+  fwhr: "upper-face width relative to the measured upper-face height",
   midfaceRatio: "the compactness of the midface",
   cheekboneHeight: "where the face carries its widest point",
   jawCheekRatio: "the jaw base measured against the cheekbones",
@@ -129,35 +130,8 @@ function fmtMean(m: ScoredMetric, sex: Sex): string {
 const sexNoun = (sex: Sex) => (sex === "male" ? "male" : "female");
 
 // ---------------------------------------------------------------------------
-// What a coach would actually say.
-//
-// This used to read: "Midline deviation is the anchor here, at 0.5% eye-span
-// against a male average of 1.6%, which lands in the top 15%. The drag is
-// eye-line / mouth-line skew. Net position: 6.2/10." Every number in it is
-// right and nobody talks like that. "Anchor", "drag" and "net position" are
-// analyst words — they describe the reader's face the way a report describes a
-// portfolio, and on a screen where somebody has just handed over a photograph
-// of themselves that distance reads as a machine grading them.
-//
-// So the shape stays and the voice changes. Same three jobs, same numbers, in
-// the order a person would say them: here is what is genuinely good, here is
-// the one to work on, here is where that leaves you. Nothing is softened and
-// nothing is added — a warmer sentence carrying a worse number would be the
-// flattery this whole product refuses.
-//
-// The greeting is the user's NAME, with the emotion picked by their own
-// trend. "Alright man" tested badly: a coach who knows you uses your name,
-// and "man"/"bro"/"queen" on every tab stops being warmth and starts being a
-// verbal tic, which is the same failure Max's wave had. So:
-//
-//   improving vs their history  →  "Nice, Nico. I see the improvements"
-//   moving down                 →  "Alright, Nico" (never down on them; the
-//                                   observation itself carries the news)
-//   first scan / guest / flat   →  "Let's get down to business, Nico"
-//
-// Only Coach Max speaks like this. Every other line in the product states
-// the observation plainly and scientifically; this greeting is the one place
-// the product is somebody in your corner rather than an instrument.
+// Report reads lead with the supplied result. Reopening a report or changing
+// tabs is not a new conversation, and a higher score is not proof of progress.
 // ---------------------------------------------------------------------------
 export type CoachTrend = "up" | "down" | "flat";
 
@@ -166,16 +140,6 @@ export type CoachTrend = "up" | "down" | "flat";
 export function trendOf(delta: number | null | undefined): CoachTrend {
   if (delta == null) return "flat";
   return delta > 0.05 ? "up" : delta < -0.05 ? "down" : "flat";
-}
-
-// Takes the RAW name: regionSummary lands in textContent where escaping
-// would print entities, while coachRead lands in innerHTML and escapes at
-// its own boundary before calling in.
-function opener(trend: CoachTrend, name?: string): string {
-  const n = name?.trim() ? `, ${name.trim()}` : "";
-  if (trend === "up") return `Nice${n}. I see the improvements`;
-  if (trend === "down") return `Alright${n}`;
-  return `Let's get down to business${n}`;
 }
 
 // Where a reading sits, as a band of the reference set.
@@ -188,26 +152,27 @@ function opener(trend: CoachTrend, name?: string): string {
 // same function the chip and the curve read, so the three cannot disagree.
 function bandOf(pct: number, sex: Sex): string {
   const s = standing(pct);
-  return `${s.top ? "top" : "bottom"} ${s.pct}% of ${sexNoun(sex)} faces`;
+  return `${s.top ? "top" : "bottom"} ${s.pct}% of the ${sexNoun(sex)} reference set`;
 }
 
 export function regionSummary(
   r: RegionScore,
   sex: Sex,
-  // Who Coach Max is talking to and how this region moved since their last
-  // scan. Both optional: a signed-out or first scan simply gets the
-  // down-to-business opener without a trend claim.
+  // Retained for callers that also carry voice context. Region text itself
+  // stays factual and does not repeat a name, greeting or history claim.
   voice?: { name?: string; delta?: number | null },
 ): string {
   // Only what was actually read. An unmeasured metric has a NaN z, which sorts
   // unpredictably and can land at either end — so the sentence would name the
   // one measurement that does not exist as the region's best or its weakest,
   // and print an em dash and an "NaNth percentile" alongside it.
-  const sorted = r.metrics.filter(wasMeasured).sort((a, b) => b.zEff - a.zEff);
+  const sorted = r.metrics.filter((m) => wasMeasured(m) && !m.implausible && Number.isFinite(m.zEff) && reliabilityOf(m.def.id) >= RELIABLE_MIN).sort((a, b) => b.zEff - a.zEff);
   const best = sorted[0];
   const worst = sorted[sorted.length - 1];
   const name = REGION_NAMES[r.region].toLowerCase();
-  const hi = opener(trendOf(voice?.delta), voice?.name);
+  // A region explanation is not a new conversation. Repeating the same
+  // greeting on every tab obscures the one thing the person came to read.
+  void voice;
   // A region CAN now arrive with nothing in it: measurements that failed are
   // dropped from the report rather than carried as undefined (see
   // scoreFrontSet), and the side view scores no metric at all in some regions.
@@ -215,17 +180,16 @@ export function regionSummary(
   // took the Midface tab out, one line further along, so it is answered here
   // rather than left to be discovered.
   if (!best || !worst) {
-    return `${hi}. I couldn't get a clean read on your ${name} from this photograph, so I'm not scoring it. It sits out of your total rather than counting against you. Worth a rescan in better light.`;
+    if (!r.metrics.some((m) => wasMeasured(m) && !m.implausible)) {
+      return `No usable measurements were captured for the ${name}, so this region is not scored. Check the photo and the required points; missing readings do not count against you.`;
+    }
+    return `There isn't enough reliable detail to interpret the ${name} on this photo. You can still inspect the available readings, but they shouldn't be used to pick a strength or a problem. Check the pose and point placement before comparing another scan.`;
   }
 
-  // What is good. Named, with the number, and with what it actually means —
-  // praise that does not say what it is praising is worth nothing.
-  const s1 = best.percentile >= 55
-    ? `${hi}. Your ${best.def.name.toLowerCase()} is carrying this one. ${fmt(best)} where the ${sexNoun(sex)} average is ${fmtMean(best, sex)}, which puts it in the ${bandOf(best.percentile, sex)}. That's ${traitOf(best.def.id)}, and yours is genuinely good.`
-    : `${hi}. I'm not going to pretend anything in your ${name} is doing heavy lifting. The best of it is ${best.def.name.toLowerCase()} at ${fmt(best)} against a ${sexNoun(sex)} average of ${fmtMean(best, sex)}, which is about the middle of the room.`;
+  // Explain the available reading and the reference used to compare it.
+  const s1 = `${best.def.name} reads ${fmt(best)} on this photo, compared with a ${sexNoun(sex)} reference mean of ${fmtMean(best, sex)}. It measures ${traitOf(best.def.id)}.`;
 
-  // What to work on. Said outright, with the number, no cushioning — the warm
-  // opener exists so that this sentence can afford to be blunt.
+  // A lower model standing is a comparison, not an instruction to change it.
   //
   // Except where the region has no score, and this is the part that was wrong
   // the first time round: naming "the one to work on" and then explaining two
@@ -234,11 +198,9 @@ export function regionSummary(
   // still, neither does the ranking that picked a worst one, so there is no
   // honest target to hand somebody.
   const scored = regionIsScored(r);
-  const s2 = !scored
-    ? `I'm not going to point you at one of these to fix, either.`
-    : worst.percentile < 45
-      ? `The one to go at is your ${worst.def.name.toLowerCase()}: ${fmt(worst)} against ${fmtMean(worst, sex)}, in the ${bandOf(worst.percentile, sex)}. That one's ${traitOf(worst.def.id)}.`
-      : `Nothing here is really letting you down. Even your weakest number, ${worst.def.name.toLowerCase()} at ${fmt(worst)}, is holding its own.`;
+  const s2 = scored && worst !== best && worst.conformance < 0.999
+    ? `${worst.def.name}, at ${fmt(worst)}, has a lower model standing within this region. That is a comparison, not evidence that you need to change it.`
+    : "";
 
   // Where that leaves you.
   //
@@ -249,10 +211,10 @@ export function regionSummary(
   // region wanders as much between two photos of one face as between two
   // faces, the ranking is a ranking of the lighting.
   const s3 = !scored
-    ? `Here's why: every measurement in your ${name} moves about as much between two photos of the same face as it does between two different people. There's nothing steady enough there to rank, so I'm not giving it a score and I'm keeping it out of your total. You still get the readings.`
-    : `All in, ${r.score.toFixed(1)} out of 10 across the ${name}. About ${scoreHigherText(r.percentile)} of ${sexNoun(sex)} faces come in above you, and you now know the exact number standing in the way. Most people never get told that.`;
+    ? `The region's repeatability is too low for a confident interpretation, so its score is shown as indicative. Review individual measurements before drawing conclusions.`
+    : `Together, the measurements give this region ${r.score.toFixed(1)} out of 10 in TrueMax's model. Open a measurement to see its construction and reference band.`;
 
-  return `${s1} ${s2} ${s3}`;
+  return [s1, s2, s3].filter(Boolean).join(" ");
 }
 
 // How rare is this, stated only as precisely as the sample allows.
@@ -342,120 +304,46 @@ export const topPctText = rankShort;
 // have seen a slight decline" is the same sale in a quieter voice.
 // ---------------------------------------------------------------------------
 export function deltaReadingCopy(d: ScanDelta): string {
-  const size = Math.abs(d.overall).toFixed(1);
-  const when =
-    d.daysAgo === 0 ? "today" : d.daysAgo === 1 ? "yesterday" : `${d.daysAgo} days ago`;
-  const dir = d.overall > 0 ? "up" : "down";
-
-  if (d.reading === "noise") {
-    return `<b>That is not a change.</b> Two photos of the same face land ${DELTA_SD} points apart
-      on average, which is more than two different people do, so ${size} ${dir} against ${when} is the
-      same face measured twice. Lighting, angle, water retention in your face, the camera.
-      Nothing to read into it.`;
-  }
-  if (d.reading === "tooSoon") {
-    // "in yesterday" and "in today" are the obvious way to get this wrong.
-    const span = d.daysAgo <= 1 ? "a day" : `${d.daysAgo} days`;
-    return `<b>${size} ${dir} is a big gap, and it is still capture.</b> A face does not
-      restructure in ${span}, so a swing this size means the two photographs differ, not that
-      you do. Shoot both in the same light, at the same distance, at the same time of day, and
-      compare those.`;
-  }
-  // This branch needs at least STRUCTURAL_DAYS, so "the last N days" always
-  // reads correctly here — "since 7 days ago" does not.
-  return `<b>${size} ${dir} over the last ${d.daysAgo} days, and that is outside normal capture spread.</b>
-    Worth paying attention to. It is still not proof: ${DELTA_SD} points is what two photos of
-    one unchanged face can differ by, and this only clears it. If something changed (sleep,
-    training, weight, alcohol, how you are grooming), this is the scan where it would show.`;
+  if (!usableDelta(d)) return "The earlier scan comparison is not available in this view.";
+  return `<b>${comparisonReading(d)}</b> ${comparisonLimit(d)}`;
 }
 
 const DELTA_SD = DISPLAY_NOISE.toFixed(1);
 
-// ---------------------------------------------------------------------------
-// Coach Max's read, and the part of it that has a memory.
-//
-// The old version said: "Best thing on the scan: eyes, top 15% of the
-// reference set. The one I would attack first: brow tilt. Cut body fat is the
-// LEVER, and it MOVES WITHOUT SURGERY." Two pieces of jargon in one sentence,
-// neither of which anybody says out loud, on the tab that is supposed to be a
-// coach talking rather than a report printing.
-//
-// It also had no memory worth the name. It printed a delta and stopped, which
-// is a measurement, not coaching. A coach who has been working with you for a
-// month opens with whether the work is showing, and if it is, wants to know
-// what you actually did.
-//
-// THE HONESTY PROBLEM, and it is the whole design here. The obvious version
-// congratulates anybody whose number went up. That is the exact sale this
-// product exists not to make: two photographs of one unchanged face differ by
-// about 0.6 points, so most "improvement" is the camera. history.ts already
-// grades every delta as noise / tooSoon / worthNoting against that spread, and
-// this copy is built on that grade rather than on the sign of the number.
-//
-// So even when a rise IS outside capture spread, Max does not simply take
-// credit for it. He says it looks real, and then asks whether they have
-// actually been doing the work, for two reasons that are both honest: it is
-// the only way to tell a working routine from a flattering month, and the
-// answer is the single most useful thing anybody could tell him. When the
-// number has NOT moved he asks the same question, because "are you doing it"
-// has to be asked in both directions or it is not a question, it is a
-// congratulation with a question mark on it.
-// ---------------------------------------------------------------------------
-
-// Long enough for a routine to have shown up in a face. Skin and composition
-// move over weeks; below this the honest read is "too early to tell" however
-// the number went.
-const ROUTINE_DAYS = 21;
-
-function memoryLine(delta: ScanDelta, sex: Sex): string {
-  const you = sex === "male" ? "bro" : "girl";
-  const size = Math.abs(delta.overall).toFixed(1);
-  // Against the running average where there is one. One prior scan can be an
-  // outlier; the mean of several cannot, and "where you usually land" is the
-  // more honest comparison against a noisy instrument.
-  const trend = delta.vsAverage != null && delta.averageOf >= 2
-    ? ` You're ${Math.abs(delta.vsAverage).toFixed(1)} ${delta.vsAverage > 0 ? "above" : "below"} your own average of the last ${delta.averageOf}, which is the number I actually watch.`
-    : "";
-
-  if (delta.reading === "tooSoon") {
-    return `You rescanned after ${delta.daysAgo} ${delta.daysAgo === 1 ? "day" : "days"}. A face doesn't restructure that fast, so I'm reading that swing as the two photographs differing, not you. Same light, same distance, same time of day, and I'll have something worth telling you.`;
-  }
-  if (delta.reading === "noise") {
-    return `Flat since last time, and flat is not the same as failing. Anything under ${DELTA_SD} points is the camera rather than your face, so this reads as no change either way.${trend} What I do want to know: have you actually been running what I gave you? Tell me straight either way. If you have, I'll stop guessing and start tightening it. If you haven't, that's the whole explanation and no drama.`;
-  }
-  // worthNoting: outside capture spread, so it is worth saying out loud.
-  if (delta.overall > 0) {
-    const earned = delta.daysAgo >= ROUTINE_DAYS
-      ? `${size} up over ${delta.daysAgo} days, ${you}, and that's past what the camera can fake. That's the look of somebody who actually did the thing instead of just reading about it. Respect.`
-      : `${size} up in ${delta.daysAgo} days, and that clears the noise floor, which most weeks don't.`;
-    return `${earned}${trend} Do me a favour though: tell me what you've actually been doing. I want to know whether this is the routine landing or just a good month, because those two look identical from here and only one of them is worth doubling down on.`;
-  }
-  // Deliberately does NOT offer to change anything. Whether a protocol has had
-  // long enough is protocol.ts's call, not this sentence's, and the version
-  // that said "then it's the plan that's wrong and I'll rebuild it" would have
-  // fired nine days into an eight-week routine.
-  return `${size} down since last time, and that's past what I can blame on the camera.${trend} Before either of us reads anything into it: have you been keeping up with what we talked about? No judgement, I'd genuinely rather know. Most of what I'd recommend needs a couple of months before it shows up here at all, so one dip is not a reason to change anything yet.`;
+function usableDelta(delta: ScanDelta): boolean {
+  return Number.isFinite(delta.overall) && Number.isFinite(delta.daysAgo) && delta.daysAgo >= 0;
 }
 
-// The part of a face somebody would actually name.
-//
-// "Want me to tell you exactly what to use on that cheekbone height" is not a
-// sentence anybody says. A person does not have a cheekbone height problem,
-// they have a cheek area they are unhappy with, and the offer has to be made
-// in those words even though the measurement behind it is precise.
-const AREA: Record<string, string> = {
-  eyes: "eye area",
-  midface: "cheeks",
-  jaw: "jawline",
-  chin: "chin and jaw",
-  nose: "nose",
-  lips: "lips",
-  proportions: "overall proportions",
-  symmetry: "symmetry",
-};
+function comparisonReading(delta: ScanDelta): string {
+  const size = Math.abs(delta.overall).toFixed(1);
+  const span = delta.daysAgo === 0 ? "earlier today" : delta.daysAgo === 1 ? "one day ago" : `${delta.daysAgo} days ago`;
+  return Number(size) === 0
+    ? `The displayed score is unchanged from the scan ${span}.`
+    : `The score is ${size} points ${delta.overall > 0 ? "higher" : "lower"} than the scan ${span}.`;
+}
 
-function areaOf(region: string): string {
-  return AREA[region] ?? "face";
+function comparisonLimit(delta: ScanDelta): string {
+  if (delta.reading === "tooSoon") {
+    return "Over this short interval, the difference cannot establish a lasting physical change. Compare photos with the same pose, expression, lighting and camera distance.";
+  }
+  if (delta.reading === "noise") {
+    return `This is within the app's usual photo-to-photo spread of about ${DELTA_SD} points, so it does not establish a physical change. A scan comparison alone cannot show whether a routine worked.`;
+  }
+  return "This is outside the app's usual capture spread, but pose, lighting and point placement can still affect it. The difference does not identify a cause or prove that a routine worked.";
+}
+
+// A score comparison is the only history provided here. It cannot establish
+// routine use, progress, a cause, or a reason to replace someone's plan.
+function memoryLine(delta: ScanDelta): string {
+  if (!usableDelta(delta)) return "The earlier scan comparison is not available in this view.";
+  let trend = "";
+  if (delta.vsAverage != null && Number.isFinite(delta.vsAverage) && Number.isInteger(delta.averageOf) && delta.averageOf >= 2) {
+    const size = Math.abs(delta.vsAverage).toFixed(1);
+    trend = Number(size) === 0
+      ? ` It matches your displayed average across ${delta.averageOf} earlier scans.`
+      : ` It is ${size} points ${delta.vsAverage > 0 ? "above" : "below"} your average across ${delta.averageOf} earlier scans.`;
+  }
+  return `${comparisonReading(delta)}${trend} ${comparisonLimit(delta)}`;
 }
 
 export interface CoachRead {
@@ -471,16 +359,9 @@ export function coachRead(
   opts: { guestName?: string; selfName?: string; scope: "front" | "side" } = { scope: "front" },
 ): CoachRead {
   const sex = r.sex;
-  // A guest's delta is deliberately null, so a guest always gets the
-  // down-to-business opener with THEIR name, never a trend claim borrowed
-  // from the owner's history. Escaped here because these strings land in
-  // innerHTML; the region summary path stays raw for textContent.
-  const rawName = opts.guestName ?? opts.selfName;
-  const hi = opener(trendOf(delta?.overall), rawName ? escapeForCopy(rawName) : undefined);
-
   // What is noticeably standing out. Region-level, because that is the unit a
   // person recognises in a mirror.
-  const regions = [...r.regions].sort((a, b) => b.percentile - a.percentile);
+  const regions = r.regions.filter((region) => regionIsScored(region) && Number.isFinite(region.percentile) && Number.isFinite(region.score)).sort((a, b) => b.percentile - a.percentile);
   const best = regions[0];
   // "Standout" has to earn the word. The best region of a face can still sit
   // below average, and calling a 45th-percentile nose "the part doing the most
@@ -488,54 +369,44 @@ export function coachRead(
   // summary gates at 55. Below the bar he says so and moves to the fixable
   // thing, which is the useful half anyway.
   const good = !best
-    ? `${hi}. Not much to go on from this scan.`
+    ? `There isn't enough reliable detail here to pick out a strongest area. Check the photo and points before drawing conclusions.`
     : best.percentile >= 55
-      ? `${hi}. Your ${REGION_NAMES[best.region].toLowerCase()} is the standout on this scan, sitting in the ${bandOf(best.percentile, sex)}. That's the part of your face doing the most for you, so don't go changing it.`
-      : `${hi}. Straight answer: nothing on this scan is jumping out as a strength yet. Your best region is your ${REGION_NAMES[best.region].toLowerCase()} and even that lands mid-pack. That's not a write-off, it just means the wins here come from work rather than from something you were born with.`;
+      ? `Your ${REGION_NAMES[best.region].toLowerCase()} has the highest supported region reading here, in the ${bandOf(best.percentile, sex)}. Open its measurements to see which proportions contributed.`
+      : `None of the measured regions stands clearly above the reference on this photo. That is a result from this model, not a judgment of how you look in person.`;
 
   // What is noticeably poor, restricted to things that can actually move. No
   // "lever", no "moves without surgery": naming a fixable thing and then
   // offering to fix it says the same thing without the vocabulary.
   const fixables = r.metrics
-    .filter((m) => m.def.fixability >= 0.3)
+    .filter((m) => !m.implausible && Number.isFinite(m.value) && Number.isFinite(m.zEff) && reliabilityOf(m.def.id) >= RELIABLE_MIN && m.def.fixability >= 0.3 && m.conformance < 0.999 && m.def.id !== "gonialAngle")
     .sort((a, b) => a.zEff - b.zEff);
   const weakest = fixables[0];
   const work = weakest
-    ? `The one holding you back most is your ${weakest.def.name.toLowerCase()}, reading ${fmt(weakest)}. Good news is it's one of the ones that actually shifts with what you do day to day, so it's worth your attention rather than your worry.`
+    ? `${weakest.def.name} reads ${fmt(weakest)} in this photo and has a lower model standing. Check the points first; the number alone does not show what caused it or whether you need to change anything.`
     : "";
 
   const memory = opts.scope === "side"
     ? ""
     : opts.guestName
-      ? `This one's ${escapeForCopy(opts.guestName)}'s scan, so I'm keeping it as its own record. It stays off your history, your average and your trend.`
+      ? `This is a guest scan. It is separate from your own history, average and trend.`
       : delta
-        ? memoryLine(delta, sex)
-        : `First scan on record, so there's nothing to compare it to yet. Scan again in a few weeks and I'll be able to tell you whether anything you're doing is working, which is the part that actually matters.`;
+        ? memoryLine(delta)
+        : `There is no earlier scan comparison in this view. For a useful comparison, keep the pose, expression, lighting and camera distance consistent.`;
 
   const invite = weakest
-    ? `Want me to help you with your ${areaOf(weakest.def.region)}? Ask me and I'll talk you through what actually works on it and how long it realistically takes.`
-    : `Ask me anything off this scan and I'll tell you what I'd actually do about it.`;
+    ? `Tell me your goal, and I can help you choose one practical next step.`
+    : `Ask me about any measurement and I'll explain what it can and can't tell you.`;
 
   return { good, work, memory, invite };
 }
 
-// Names come from a user-controlled field and land in innerHTML. results.ts
-// has its own escaper for exactly this, but coachRead is built here and the
-// caller should not have to remember which of its four strings needs treating.
-function escapeForCopy(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-}
-
 // ---------------------------------------------------------------------------
-// Improvement plan copy — non-surgical levers only, each tied to the actual
-// measured number it moves.
+// Plan explanations describe the reading and relevant choices. A fixability
+// coefficient is a model input, not a measured fraction a routine can change.
 // ---------------------------------------------------------------------------
 
-// Every lever declares which kind of advice it is. Someone who told us to keep
-// food out of it still gets the measurement and still gets told it is fixable —
-// they just don't get the diet paragraph. Suppressing the advice, never the
-// number, is the line this whole product is built on.
+// Keep advice-channel controls intact. A declined category still permits the
+// reading, but never a claim that buying guidance would move a known amount.
 interface Lever {
   title: string;
   tag: string;
@@ -545,10 +416,14 @@ interface Lever {
   neutral: (m: ScoredMetric, sex: Sex) => string;
 }
 
-const neutralCopy = (kind: string) => (m: ScoredMetric, sex: Sex) =>
-  `${m.def.name} measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)}. The ${Math.round(
-    m.def.fixability * 100,
-  )}% of that gap that moves without surgery moves with ${kind}. You asked me to keep those recommendations out, so the number is here and the advice isn't.`;
+function readingContext(m: ScoredMetric, sex: Sex): string {
+  if (!wasMeasured(m)) return `${m.def.name} was not available in this scan.`;
+  if (m.implausible) return `${m.def.name} needs a point-placement review before interpretation.`;
+  return `${m.def.name} reads ${fmt(m)} in this photo, compared with a ${sexNoun(sex)} reference mean of ${fmtMean(m, sex)}. The reference is a comparison, not a target.`;
+}
+
+const neutralCopy = (m: ScoredMetric, sex: Sex) =>
+  `${readingContext(m, sex)} You chose not to receive this category of advice, so no routine is suggested here.`;
 
 // What a free or Starter plan sees in place of the method.
 //
@@ -558,105 +433,108 @@ const neutralCopy = (kind: string) => (m: ScoredMetric, sex: Sex) =>
 // user's own choice is the kind of small dishonesty this product is supposed to
 // be the opposite of.
 //
-// What it withholds is the METHOD, never the measurement. The number, the gap,
-// the population average and how much of that gap is even movable are all still
-// here, because those are the things somebody came for and the things we claim
-// to be honest about. What costs money is being told exactly what to do about
-// it — which is the one part a person could get elsewhere, and the one part
-// that takes real work to write well.
+// The measured reading and its reference remain visible. Paid guidance is not
+// a promise that the person needs a routine or that one would move the number.
 export function lockedCopy(m: ScoredMetric, sex: Sex): string {
-  const movable = Math.round(m.def.fixability * 100);
-  return `${m.def.name} measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(
-    m,
-    sex,
-  )}, and about ${movable}% of that gap moves without surgery. The measurement is yours either way. The specific routine that moves it is part of Max.`;
+  return `${readingContext(m, sex)} Guidance for routines that fit your goals is part of Max.`;
 }
 
 const LEVERS: Record<string, Lever> = {
   gonialProxy: {
     channel: "diet",
-    neutral: neutralCopy("composition work"),
-    title: "Cut body fat",
-    tag: "CORE",
+    neutral: neutralCopy,
+    title: "Check the jaw outline",
+    tag: "REVIEW",
     body: (m, sex) =>
-      `Submental and jawline fat blunt the gonial turn. Yours measures ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)}. Composition is the single biggest lever on this number.`,
+      `${readingContext(m, sex)} This front-view outline does not identify body fat or the reason for the shape. Review the jaw points in a neutral, level capture before interpreting a difference.`,
   },
   jawCheekRatio: {
     channel: "diet",
-    neutral: neutralCopy("composition work"),
-    title: "Debloat protocol",
-    tag: "DAILY",
+    neutral: neutralCopy,
+    title: "Compare the lower-face outline",
+    tag: "REVIEW",
     body: (m, sex) =>
-      `Sodium, alcohol and short sleep puff the lower face and drag the measured jaw : cheek ratio (${fmt(m)} vs the ${fmtMean(m, sex)} norm). Two weeks of discipline shows up in this exact number.`,
+      `${readingContext(m, sex)} This ratio reflects a photographed outline. It cannot tell whether food, sleep or body composition explains the reading. Use the same camera distance and expression for comparisons.`,
   },
   cheekboneHeight: {
     channel: "diet",
-    neutral: neutralCopy("composition work"),
-    title: "Body-fat reduction",
-    tag: "CORE",
-    body: (m) =>
-      `Cheek fat pads bury the zygomatic line. Your widest point sits at ${fmt(m)} of eye-to-chin height; leaning out raises where the face visually breaks.`,
+    neutral: neutralCopy,
+    title: "Review cheek point placement",
+    tag: "REVIEW",
+    body: (m, sex) =>
+      `${readingContext(m, sex)} The reading locates the widest point in the photographed outline. Check that point and the head angle before comparing scans; the number does not establish a need to change your weight.`,
   },
   fwhr: {
     channel: "lifestyle",
-    neutral: neutralCopy("habit and posture work"),
-    title: "Composition + posture",
-    tag: "CORE",
+    neutral: neutralCopy,
+    title: "Review capture geometry",
+    tag: "REVIEW",
     body: (m, sex) =>
-      `Your fWHR of ${fmt(m)} (${sexNoun(sex)} mean ${fmtMean(m, sex)}) shifts with facial fat and head carriage. Both are trainable and neither is surgical.`,
+      `${readingContext(m, sex)} Check the head position and landmark placement. This photographic ratio does not establish a training or body-composition goal.`,
   },
   browPosition: {
     channel: "grooming",
-    neutral: neutralCopy("grooming"),
-    title: "Brow grooming",
-    tag: "LOW-EFFORT",
+    neutral: neutralCopy,
+    title: "Optional brow grooming",
+    tag: "GROOMING",
     body: (m, sex) =>
-      `The brow-to-eye gap measures ${fmt(m)} against a ${fmtMean(m, sex)} ${sexNoun(sex)} norm. Shaping the underside of the brow tightens this without touching anything else.`,
+      `${readingContext(m, sex)} If brow shape is a goal you chose, consider a small grooming change based on your preferences. A different brow edge may change the detected points; that is not proof of an improvement.`,
   },
   mouthCornerTilt: {
     channel: "capture",
-    neutral: neutralCopy("capture discipline"),
-    title: "Neutral capture discipline",
+    neutral: neutralCopy,
+    title: "Check the expression",
     tag: "CAPTURE",
     body: (m) =>
-      `Corner tilt reads ${fmt(m)}. Expression moves this number more than anatomy does. Recapture with a fully neutral mouth before chasing it.`,
+      `Corner tilt reads ${fmt(m)} in this photo. Expression and point placement can affect it. Use a relaxed, neutral mouth and compare like-for-like captures before treating a difference as persistent.`,
   },
   mirrorDeviation: {
     channel: "lifestyle",
-    neutral: neutralCopy("posture and habit work"),
-    title: "Posture + chewing balance",
-    tag: "HABIT",
+    neutral: neutralCopy,
+    title: "Check alignment and expression",
+    tag: "REVIEW",
     body: (m) =>
-      `Unilateral chewing and forward head posture measurably worsen mirror deviation over time. Yours is ${fmt(m)} of IPD; balancing both sides protects the number.`,
+      `Mirror-axis deviation reads ${fmt(m)} in this photo. It does not establish a posture or chewing problem. Keep the head level, face the camera directly and check the paired landmarks before comparing symmetry readings.`,
   },
   eyeAspectRatio: {
     channel: "lifestyle",
-    neutral: neutralCopy("sleep and routine work"),
-    title: "Sleep + sodium discipline",
-    tag: "DAILY",
+    neutral: neutralCopy,
+    title: "Check the eye opening",
+    tag: "REVIEW",
     body: (m) =>
-      `Periorbital puffiness changes the measured aperture (currently ${fmt(m)}). Consistent sleep and lower sodium restore the true measurement within weeks.`,
+      `Eye aspect ratio reads ${fmt(m)} in this photo. Blinking, expression and point placement can affect the visible opening. Compare relaxed captures with the same lighting; this number cannot diagnose sleep or diet.`,
   },
   lipHeightLowerThird: {
     channel: "grooming",
-    neutral: neutralCopy("grooming"),
-    title: "Lip-line grooming",
-    tag: "LOW-EFFORT",
+    neutral: neutralCopy,
+    title: "Optional lip-line styling",
+    tag: "GROOMING",
     body: (m) =>
-      `Beard and lip-line grooming shift how much of the lower third the lips claim (measured: ${fmt(m)}). The lowest-effort change on this list.`,
+      `Lip height reads ${fmt(m)} of the lower third in this photo. If lip-line styling is part of your goal, choose it around your preferences. Styling changes presentation; this reading does not tell you that your lips need changing.`,
   },
 };
 
 const DEFAULT_LEVER: Lever = {
-  title: "Targeted habit work",
-  tag: "HABIT",
+  title: "Review the reading",
+  tag: "REVIEW",
   channel: "lifestyle",
-  neutral: neutralCopy("habit work"),
+  neutral: neutralCopy,
   body: (m, sex) =>
-    `${m.def.name} sits at ${fmt(m)} against the ${sexNoun(sex)} average of ${fmtMean(m, sex)}. Debloating, leaner composition and capture discipline close part of this gap.`,
+    `${readingContext(m, sex)} Check the points and capture conditions first. Choose any routine around your own goal; this number does not identify a cause or predict a habit's effect.`,
 };
 
 export function leverFor(m: ScoredMetric): Lever {
+  if (!wasMeasured(m) || m.implausible || reliabilityOf(m.def.id) < RELIABLE_MIN) {
+    return {
+      title: "Review the reading",
+      tag: "REVIEW",
+      channel: LEVERS[m.def.id]?.channel ?? DEFAULT_LEVER.channel,
+      neutral: neutralCopy,
+      body: (reading, sex) => `${readingContext(reading, sex)} ${!wasMeasured(reading) || reading.implausible
+        ? "Check the photo and required points before interpreting this measurement."
+        : "Its photo-to-photo repeatability is too low to guide a routine. Review the capture and points instead."}`,
+    };
+  }
   return LEVERS[m.def.id] ?? DEFAULT_LEVER;
 }
 
@@ -740,7 +618,7 @@ export function percentileLine(pct: number, sex: Sex, tailLimit?: number): strin
 // The substance of the old line was worth keeping and is not banded, because it
 // is equally true at every score.
 export function overviewCaveat(): string {
-  return `One photograph, scored on bone proportion and soft tissue against a reference
-    population. Two photos of the same face differ by about 0.9 points, so a single
-    scan is one reading rather than a verdict.`;
+  return `These are estimates from photographs, compared with TrueMax's reference model.
+    Pose, expression, lighting and point placement can change the result. A score
+    is not a medical assessment or an objective verdict on attractiveness.`;
 }

@@ -1,12 +1,12 @@
 {
-  "version": 3,
+  "version": 4,
   "source": "scripts/build-max-3d.mjs",
   "identitySource": "src/ui/maxCharacter.ts",
   "identity": "Round original oval Max with pupil-less light bars, inset visor, navy flippers and expressive prop routines",
   "rig": "rigid transform hierarchy",
-  "triangles": 18712,
+  "triangles": 19030,
   "materials": 3,
-  "bytes": 1066568,
+  "bytes": 1113768,
   "clips": [
     "idle",
     "listening",

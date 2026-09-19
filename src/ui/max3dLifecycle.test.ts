@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createMax3DMounter } from "./max3d.js";
 import type { Max3DRuntime } from "./max3d.js";
+import { bindNativeAppLifecycle } from "../engine/nativeBridge.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -52,6 +53,29 @@ function fakeRuntime() {
   };
   return { calls, runtime };
 }
+
+test("Coach mounts face forward while explicit inspection views survive animation and visibility changes", async () => {
+  const f = browser();
+  const first = fakeRuntime(), second = fakeRuntime();
+  const runtimes = [first.runtime, second.runtime];
+  const mount = createMax3DMounter(async () => ({ createMax3D: async () => runtimes.shift()! }));
+  const handle = mount(f.stage, "idle");
+  let replacement: ReturnType<typeof mount> | undefined;
+  try {
+    f.visible(); await flush();
+    assert.deepEqual(first.calls.filter(([name]) => name === "view"), [["view", "front"]]);
+    for (const view of ["three-quarter", "side", "back", "front", "side"] as const) handle.setView(view);
+    handle.setAnimation("speaking");
+    f.visible(false); f.visible(true);
+    assert.deepEqual(first.calls.filter(([name]) => name === "view").map(([, value]) => value),
+      ["front", "three-quarter", "side", "back", "front", "side"]);
+    assert.ok(first.calls.some(([name, value]) => name === "state" && value === "speaking"));
+    replacement = mount(f.stage, "listening");
+    f.visible(); await flush();
+    assert.deepEqual(second.calls.filter(([name]) => name === "view"), [["view", "front"]],
+      "opening a new surface must not inherit an inspection angle from the previous renderer");
+  } finally { replacement?.destroy(); handle.destroy(); f.restore(); }
+});
 
 test("latest state, view, playful preference and speech level survive both delayed import and asset creation", async () => {
   const browserState = browser();
@@ -126,4 +150,27 @@ test("a visible embedded browser without IntersectionObserver can load the lazy 
     assert.ok(calls.some(([name, value]) => name === "state" && value === "quiet"));
     assert.ok(calls.some(([name, value]) => name === "playful" && value === false));
   } finally { handle.destroy(); f.restore(); }
+});
+
+test("native background blocks creation, pauses animation, and is unsubscribed on disposal", async () => {
+  const f = browser();
+  const { runtime, calls } = fakeRuntime();
+  let emit!: (state: { isActive: boolean }) => void;
+  const unbind = bindNativeAppLifecycle({
+    addListener: async (_event, listener) => { emit = listener; return { remove: async () => {} }; },
+    getState: async () => ({ isActive: false }),
+  });
+  let loads = 0;
+  const mount = createMax3DMounter(async () => { loads++; return { createMax3D: async () => runtime }; });
+  const handle = mount(f.stage);
+  try {
+    await flush(); f.visible(); await flush(); assert.equal(loads, 0);
+    emit({ isActive: true }); await flush(); assert.equal(loads, 1);
+    emit({ isActive: false }); emit({ isActive: true });
+    assert.deepEqual(calls.filter(([name]) => name === "pause").map(([, value]) => value), [false, true, false]);
+    handle.destroy();
+    const count = calls.length;
+    emit({ isActive: false }); emit({ isActive: true });
+    assert.equal(calls.length, count, "disposed surfaces must not receive native activity events");
+  } finally { handle.destroy(); unbind(); f.restore(); }
 });

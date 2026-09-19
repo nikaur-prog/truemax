@@ -1,19 +1,19 @@
 import {
   commitProtocol,
-  judge,
   nextPrompt,
   readProtocols,
   startKindOf,
-  verdictCopy,
   writeProtocols,
 } from "../engine/protocol.js";
 import type { Protocol, ProtocolPrompt } from "../engine/protocol.js";
-import { DISPLAY_NOISE } from "../engine/history.js";
 import type { ScanDelta } from "../engine/history.js";
 import { localDay } from "../engine/dailyStreak.js";
 import { tickProtocol, tickedOn } from "../engine/protocol.js";
 import { recordStreakAction } from "./streakLamp.js";
 import { activeScanOwner } from "../engine/scanScope.js";
+import { buildCoachingSnapshot } from "../engine/maxContext.js";
+import { loadProfile } from "../engine/goals.js";
+import { announceMaxConversationChanged, syncMaxPlanItems } from "../engine/maxConversations.js";
 
 // ---------------------------------------------------------------------------
 // The check-in, in the performance tracker.
@@ -43,6 +43,14 @@ const now = (): number => Date.now();
 
 function save(list: Protocol[], updated: Protocol): void {
   writeProtocols(list.map((p) => (p.id === updated.id ? updated : p)));
+  void syncMaxPlanItems(buildCoachingSnapshot(loadProfile(), readProtocols()).routines)
+    .catch(() => undefined).finally(announceMaxConversationChanged);
+}
+
+export function protocolReviewReply(noticed: boolean): string {
+  return noticed
+    ? "Recorded: you have noticed a change. That is your experience, not proof this routine caused it. Comparable photos can add context, but the overall score cannot confirm whether this action worked."
+    : "Recorded: you have not noticed a change. Review how consistently you used the routine and whether it still fits your goal before deciding what to change. An overall scan score cannot settle that question.";
 }
 
 /**
@@ -97,14 +105,12 @@ const WHEN_OPTIONS: ReadonlyArray<{ label: string; days: number }> = [
 /**
  * Mount the check-in card, if there is anything to check in on.
  *
- * `delta` is the scan movement, used only when a protocol comes due: the
- * verdict needs to know whether the face actually moved, and that judgement is
- * made here against DISPLAY_NOISE rather than inside the engine, so the engine
- * can never be handed a raw number and talked into calling a 0.2 wobble a win.
+ * The optional overall scan delta is retained for callers, but cannot establish
+ * whether this specific routine worked. Review records the user's own answer.
  */
 export function mountProtocolCard(
   host: HTMLElement | null,
-  delta: ScanDelta | null,
+  _delta: ScanDelta | null,
   onChange?: () => void,
 ): ProtocolCardHandle | null {
   if (!host) return null;
@@ -179,17 +185,7 @@ export function mountProtocolCard(
     if (prompt.kind === "adherence" || prompt.kind === "judge") recordStreakAction("checkin");
 
     if (prompt.kind === "judge") {
-      // Their answer and the scan's are two different readings and both get
-      // said. "worthNoting" is history.ts's own grade against DISPLAY_NOISE —
-      // the raw number never reaches the verdict.
-      const scanMoved = delta != null && delta.reading === "worthNoting" && delta.overall > 0;
-      const v = judge(updated, at, scanMoved || said);
-      const disagree = said !== scanMoved
-        ? said
-          ? ` The scan hasn't caught up with you yet, and that's normal: you see your own face every day and it only needs to shift a little for you to clock it. ${DISPLAY_NOISE.toFixed(1)} points is the smallest thing I can call.`
-          : ` For what it's worth, the scan does think something moved. Worth another few weeks before you write it off.`
-        : "";
-      settle(el, verdictCopy(v) + disagree);
+      settle(el, protocolReviewReply(said));
       onChange?.();
       return;
     }
@@ -198,11 +194,11 @@ export function mountProtocolCard(
     const instantDone = said && prompt.kind === "started" && startKindOf(p) === "instant";
     settle(el, said
       ? instantDone
-        ? "Good. Have a proper look in decent light, and next time you're here I'll ask whether you can see it."
-        : "Good. I'll leave you to it and check in next week."
+        ? "Recorded. Review it in consistent lighting; a follow-up will appear here when it is due."
+        : "Recorded. Your next check-in will appear here when it is due."
       : prompt.kind === "adherence"
-        ? "Fair enough, and thanks for being straight with me. Nothing changes yet. Pick it back up when you can and the clock carries on from where it was."
-        : "No problem. I'll ask again in a week.");
+        ? "Recorded. The routine is still on your list. Consider a smaller, more manageable version if consistency is difficult."
+        : "Recorded. A follow-up will appear here in a week.");
     onChange?.();
   }
 

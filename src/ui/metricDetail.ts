@@ -6,7 +6,7 @@ import { CELEB_MATCH_MIN_PCT, regionMatches } from "../engine/celebs.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
 import type { RegionId, ScoredMetric, Sex } from "../engine/types.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
-import { animateMeasurement, measurementBounds } from "./measureOverlay.js";
+import { animateMeasurement, measurementBounds, prefersReducedOverlayMotion } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { applyZoom, zoomToBounds } from "./zoomTransform.js";
@@ -16,6 +16,8 @@ import { fmt, metricTrait, rankShort } from "./templates.js";
 import { metricRead } from "../engine/metricReads.js";
 import { scoreTone } from "./scoreTone.js";
 import { celebrityPortraitImage, celebrityPortraitCredits, installCelebrityPortraitFallback } from "./celebrityPortrait.js";
+import { createStagePaint } from "./stagePaint.js";
+import { rasterSizeFor, sidePointsForRaster } from "./interactiveRaster.js";
 
 // ---------------------------------------------------------------------------
 // One measurement, opened.
@@ -77,11 +79,10 @@ export function stageViewFor(
   hasSide: boolean,
   hasFront: boolean,
 ): "side" | "front" | null {
-  // A side metric is drawn on the profile when the profile is here; without it
-  // the front stage still shows WHERE the number lives via the region fallback,
-  // which is what the main pane does too.
-  if (hasSideOverlay(m.def.id) && hasSide) return "side";
-  return hasFront ? "front" : hasSide ? "side" : null;
+  // A photograph of the other view cannot substantiate this construction.
+  // Keep the reading and navigation available, but explain the missing view.
+  if (m.def.view === "side" || hasSideOverlay(m.def.id)) return hasSide ? "side" : null;
+  return hasFront ? "front" : null;
 }
 
 /** Step through the deck without wrapping — a counter that wraps lies. */
@@ -91,16 +92,15 @@ export function stepIndex(index: number, delta: number, total: number): number {
 
 /** A short, human read for the score shown beside one measurement. */
 export function metricScoreLabel(score: number, name: string): string {
+  if (!Number.isFinite(score)) return "Not scored";
   const quality = score >= 7.5
-    ? "Excellent"
+    ? "High model score"
     : score >= 6
-      ? "Good"
+      ? "Above-reference score"
       : score >= 4.5
-        ? "Balanced"
-        : score >= 3
-          ? "Below range"
-          : "Weak";
-  return `${quality} ${name.toLowerCase()}`;
+        ? "Mid-range model score"
+        : "Below-reference score";
+  return `${quality} for ${name.toLowerCase()}`;
 }
 
 let active: HTMLElement | null = null;
@@ -109,18 +109,7 @@ let opts: MetricDetailOpts | null = null;
 let index = 0;
 let tab: "overview" | "celebs" = "overview";
 let shownStage: "side" | "front" | null = null;
-// The pending photograph swap, and the render it belongs to.
-//
-// The swap is deferred 150ms so the stage can dip through black, and the
-// timeout captured the metric, the view and the zoom. Untracked, a second
-// showAt inside that window — arrow-key autorepeat fires every ~30-50ms, and a
-// swipe-back or a double-tap on next/prev do it just as easily — let the older
-// callback land AFTER the newer one, painting the previous measurement's
-// photograph and drawing under the new metric's header. Cancelled on every new
-// render and on close, and version-guarded so a timer that somehow survives
-// still refuses to paint over a render it does not belong to.
-let swapTimer: number | null = null;
-let generation = 0;
+let stagePaint: ReturnType<typeof createStagePaint> | null = null;
 // Where focus came from, so closing puts a keyboard user back on their row
 // rather than at the top of the document.
 let opener: HTMLElement | null = null;
@@ -132,9 +121,8 @@ export function isMetricDetailOpen(): boolean {
 export function closeMetricDetail(): void {
   fade?.cancel();
   fade = null;
-  if (swapTimer !== null) window.clearTimeout(swapTimer);
-  swapTimer = null;
-  generation++;
+  stagePaint?.cancel();
+  stagePaint = null;
   active?.remove();
   active = null;
   opts = null;
@@ -191,10 +179,12 @@ function step(delta: number): void {
 // from the inner end to the outer is not what a typical face does, it is what
 // our two landmarks do. Saying so is cheaper than being asked.
 const CONSTRUCTION_CAVEAT: Record<string, string> = {
+  gonialAngle:
+    "Measured between the visible jaw corner, the surface point used for the jaw hinge, and the chin bottom. This is a photographic surface angle, not the skeletal gonial angle measured on an X-ray. Its current scoring reference is borrowed from skeletal measurements and has not been validated for these surface points. Point placement and head turn can change the reading.",
   browTilt:
-    "Measured inner-end to outer-end on the mesh, which sits lower at the outer end than the brow's visible tail: so this number runs about 12° below the same measurement taken to the brow peak. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
+    "This uses the mesh's inner and outer brow points. An angle measured to the brow peak uses a different endpoint, so the numbers are not directly comparable. Check which points each tool uses before interpreting a difference.",
   jawFrontalAngle:
-    "Constructed differently from the same-named angle in other tools, which read about 26° apart on the same face. Comparisons within TrueMax hold; the raw figure is not comparable to one quoted elsewhere.",
+    "This front-view angle uses the chin bottom and the two jaw corners. Other tools may use a different jaw-angle construction, so a difference in the raw number is not necessarily a placement error.",
 };
 
 export function constructionCaveat(id: string): string | null {
@@ -209,28 +199,28 @@ function normLine(m: ScoredMetric, sex: Sex): string {
   // toFixed on a mean that sits a hair under zero prints "-0.0", which reads
   // as a typo rather than as a number.
   const noNegZero = (s: string) => (/^-0(\.0+)?$/.test(s) ? s.slice(1) : s);
-  const avg = `${group} average <b>${noNegZero(d.mean.toFixed(dec))}${unit}</b> ± ${d.sd.toFixed(dec)}`;
+  const avg = `${group} reference mean <b>${noNegZero(d.mean.toFixed(dec))}${unit}</b> · SD ${d.sd.toFixed(dec)}`;
   const dir = directionFor(m.def, sex);
   if (dir === "band") {
-    return `${avg} · ideal <b>${m.idealRange[0].toFixed(dec)}–${m.idealRange[1].toFixed(dec)}${unit}</b>`;
+    return `${avg} · model band <b>${m.idealRange[0].toFixed(dec)}–${m.idealRange[1].toFixed(dec)}${unit}</b>`;
   }
   const edge = dir === "lower" ? m.idealRange[1] : m.idealRange[0];
-  return `${avg} · ${dir === "lower" ? "lower is better, from" : "higher is better, from"} <b>${edge.toFixed(dec)}${unit}</b>`;
+  return `${avg} · the model favours ${dir} values, with a display threshold of <b>${edge.toFixed(dec)}${unit}</b>. This is not a personal target.`;
 }
 
 function positionLine(m: ScoredMetric, sex: Sex): string {
   const group = sex === "male" ? "men" : "women";
   if (m.conformance >= 0.999) {
-    return `Inside the ideal band: this feature is not holding the face back at all.`;
+    return `This reading is inside the model's preferred band. Being outside a band would not, by itself, mean something needs changing.`;
   }
   // statedPct, like the chip beside it. Math.round put the same number on the
   // screen twice at two precisions — "Bottom 45%" over "closer to the ideal
   // than 43% of men" — and the finer of the two is a resolution a ~110-face
   // reference set cannot support in the first place.
-  return `Closer to the ideal than <b>${statedPct(m.percentile)}%</b> of ${group}.`;
+  return `Modelled standing: above <b>${statedPct(m.percentile)}%</b> of the ${group}'s reference distribution on this measurement, not on overall attractiveness.`;
 }
 
-function overviewHTML(m: ScoredMetric, sex: Sex): string {
+export function overviewHTML(m: ScoredMetric, sex: Sex): string {
   const indicative = reliabilityOf(m.def.id) < RELIABLE_MIN;
   // A flagged reading gets NO standing sentence. It used to print "closer to
   // the ideal than N% of men" — a percentile computed from the very value the
@@ -239,7 +229,7 @@ function overviewHTML(m: ScoredMetric, sex: Sex): string {
   // The read only exists when the value leans at least half an sd off the
   // average AND the metric's construction is settled — metricRead returns null
   // otherwise, and null renders as nothing rather than as filler.
-  const read = m.implausible ? null : metricRead(m, sex);
+  const read = m.implausible || indicative ? null : metricRead(m, sex);
   return `
     <p class="mdx-trait">It measures ${metricTrait(m.def.id)}.</p>
     <p class="mdx-norm">${normLine(m, sex)}</p>
@@ -247,12 +237,12 @@ function overviewHTML(m: ScoredMetric, sex: Sex): string {
       ? `<p class="mdx-caveat">${constructionCaveat(m.def.id)}</p>`
       : ""}
     ${read ? `<p class="mdx-read"><b>On your face:</b> ${read}.</p>` : ""}
-    ${m.implausible ? "" : `<p class="mdx-pos">${positionLine(m, sex)}</p>`}
+    ${m.implausible || indicative ? "" : `<p class="mdx-pos">${positionLine(m, sex)}</p>`}
     ${m.implausible
-      ? `<p class="mdx-flag">This reading fell outside the range a face occupies, so it is treated as a misplaced point rather than a measurement. It has no population position and it moves nothing. The landmarks behind it need re-checking.</p>`
+      ? `<p class="mdx-flag">${Number.isFinite(m.value) ? "This value did not pass the measurement checks. Review the photo and the points used for it." : "This measurement is unavailable because a required point or part of the geometry could not be read."} It is excluded from the score; this is not a negative result about your face.</p>`
       : ""}
     ${indicative && !m.implausible
-      ? `<p class="mdx-flag soft">Shown, not scored: across many photos of the same people this one moves as much between two photos of one face as between two different faces, so it carries no weight.</p>`
+      ? `<p class="mdx-flag soft">Indicative only: this measurement has low repeatability across photos. ${reliabilityOf(m.def.id) === 0 ? "It has no weight in the overall score." : "Its contribution is reduced by the reliability weighting."} Do not read it as a reliable strength or weakness.</p>`
       : ""}`;
 }
 
@@ -261,8 +251,8 @@ function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
   // against one. The matcher would happily oblige — its only test is
   // percentile >= 40, and an out-of-bounds value still carries a percentile —
   // so the gate has to be here.
-  if (m.implausible) {
-    return `<p class="mdx-none">No comparison is offered on a reading this far outside anatomical range: it describes where a point landed, not the face. Re-check the landmarks and it will match on the corrected value.</p>`;
+  if (m.implausible || reliabilityOf(m.def.id) < RELIABLE_MIN) {
+    return `<p class="mdx-none">There isn't a reliable measurement here to compare. Review the photo and landmarks first.</p>`;
   }
   // The matcher's eligibility rule, applied to exactly this metric, so a match
   // is "your X measures like theirs" and nothing vaguer.
@@ -283,8 +273,8 @@ function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
   // metric, today), not because a distance check rejected them — the matcher
   // has no proximity cap.
   return m.percentile < CELEB_MATCH_MIN_PCT
-    ? `<p class="mdx-none">Comparisons are only offered where you place in the top ${100 - CELEB_MATCH_MIN_PCT}% on the measurement, and this one sits below that. A flattering comparison you did not earn would make every other number here worth less.</p>`
-    : `<p class="mdx-none">No reference face in the set carries this measurement yet, so there is nothing to compare against. The set grows with every analysed face.</p>`;
+    ? `<p class="mdx-none">This comparison feature currently covers the top ${100 - CELEB_MATCH_MIN_PCT}% of model standings, so it doesn't offer a match for this reading. That is a limit of the feature, not a judgment about your face.</p>`
+    : `<p class="mdx-none">The reference set doesn't include this measurement yet, so no comparison is available.</p>`;
 }
 
 function barHTML(m: ScoredMetric, sex: Sex): string {
@@ -321,13 +311,14 @@ function paintStage(view: "side" | "front"): void {
   const photo = active.querySelector<HTMLCanvasElement>(".mdx-photo")!;
   const src = view === "side" ? opts.sidePhoto : opts.frontPhoto;
   if (!src) return;
-  photo.width = src.width;
-  photo.height = src.height;
-  photo.getContext("2d")!.drawImage(src, 0, 0);
   zoom.style.aspectRatio = `${src.width} / ${src.height}`;
+  const size = rasterSizeFor(photo, src.width, src.height);
+  if (photo.width !== size.width) photo.width = size.width;
+  if (photo.height !== size.height) photo.height = size.height;
+  photo.getContext("2d")!.drawImage(src, 0, 0, size.width, size.height);
   const overlay = active.querySelector<HTMLCanvasElement>(".mdx-overlay-canvas")!;
-  overlay.width = src.width;
-  overlay.height = src.height;
+  if (overlay.width !== size.width) overlay.width = size.width;
+  if (overlay.height !== size.height) overlay.height = size.height;
   shownStage = view;
 }
 
@@ -336,9 +327,12 @@ function drawMetric(m: ScoredMetric, view: "side" | "front"): void {
   const overlay = active.querySelector<HTMLCanvasElement>(".mdx-overlay-canvas")!;
   fade?.cancel();
   if (view === "side" && opts.sidePoints && opts.sidePhoto) {
-    fade = animateSideMeasurement(overlay, opts.sidePoints, opts.sidePhoto.width, opts.sidePhoto.height, m);
+    const size = rasterSizeFor(overlay, opts.sidePhoto.width, opts.sidePhoto.height);
+    const points = sidePointsForRaster(opts.sidePoints, opts.sidePhoto.width, opts.sidePhoto.height, size.width, size.height);
+    fade = animateSideMeasurement(overlay, points, size.width, size.height, m);
   } else if (opts.landmarks && opts.frontPhoto) {
-    fade = animateMeasurement(overlay, opts.landmarks, opts.frontPhoto.width, opts.frontPhoto.height, m);
+    const size = rasterSizeFor(overlay, opts.frontPhoto.width, opts.frontPhoto.height);
+    fade = animateMeasurement(overlay, opts.landmarks, size.width, size.height, m);
   }
 }
 
@@ -349,10 +343,11 @@ function showAt(next: number): void {
   index = next;
   const m = opts.metrics[index];
   const view = stageViewFor(m, !!(opts.sidePhoto && opts.sidePoints), !!(opts.frontPhoto && opts.landmarks));
-  // A render supersedes any swap still pending from the last one.
-  if (swapTimer !== null) window.clearTimeout(swapTimer);
-  swapTimer = null;
-  const mine = ++generation;
+  // Cancel the old drawing immediately, including during a deferred photo
+  // swap. The swap owner also restores opacity on rapid reversals.
+  stagePaint?.cancel();
+  fade?.cancel();
+  fade = null;
 
   // NO STAGE IS NOT NO CARD. This used to `return` before writing a single
   // word, so a report whose front capture is unavailable — a documented state,
@@ -363,6 +358,9 @@ function showAt(next: number): void {
   } else {
     active.querySelector<HTMLElement>(".mdx-stage")!.classList.remove("mdx-nostage");
   }
+  const unavailablePhoto = active.querySelector<HTMLElement>(".mdx-unavailable")!;
+  unavailablePhoto.hidden = !!view;
+  unavailablePhoto.textContent = `The ${m.def.view === "side" || hasSideOverlay(m.def.id) ? "side" : "front"} photo for this measurement isn't available in this saved report. You can still read the measurement and move to the next one.`;
 
   // Header
   active.querySelector(".mdx-count")!.textContent = `${index + 1} / ${opts.metrics.length}`;
@@ -372,7 +370,7 @@ function showAt(next: number): void {
     [
       opts.deckLabel?.toUpperCase(),
       REGION_NAMES[shownRegion]?.toUpperCase() ?? shownRegion.toUpperCase(),
-      view === "side" ? "PROFILE" : "FRONT",
+      m.def.view === "side" || hasSideOverlay(m.def.id) ? "PROFILE" : "FRONT",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -383,13 +381,8 @@ function showAt(next: number): void {
   if (view) {
     const spec = stageZoom(m, view);
     if (view !== shownStage) {
-      const stage = active.querySelector<HTMLElement>(".mdx-stage")!;
-      stage.classList.add("swap");
-      swapTimer = window.setTimeout(() => {
-        swapTimer = null;
-        // The guard that makes the cancel above belt-and-braces rather than
-        // load-bearing: a timer from a superseded render refuses to paint.
-        if (mine !== generation || !active) return;
+      stagePaint?.run(() => {
+        if (!active) return;
         paintStage(view);
         zoomEl.style.transition = "none";
         applyZoom(zoomEl, spec);
@@ -397,36 +390,35 @@ function showAt(next: number): void {
         // Reflow so the no-transition zoom lands before transitions resume.
         void zoomEl.offsetWidth;
         zoomEl.style.transition = "";
-        stage.classList.remove("swap");
-      }, 150);
+      }, prefersReducedOverlayMotion() ? 0 : 150);
     } else {
       applyZoom(zoomEl, spec);
       drawMetric(m, view);
     }
   }
 
-  // Readout + tabs, re-entering with a small rise so the change reads.
+  // The camera carries the transition. Keep text immediately readable rather
+  // than forcing synchronous layout to restart every child's entrance.
   const info = active.querySelector<HTMLElement>(".mdx-info")!;
-  info.classList.remove("enter");
-  void info.offsetWidth;
-  info.classList.add("enter");
   info.querySelector(".mdx-value")!.textContent = fmt(m);
-  const tone = m.implausible ? null : scoreTone(m.score);
+  const indicative = reliabilityOf(m.def.id) < RELIABLE_MIN;
+  const unavailable = !!m.implausible || indicative;
+  const tone = unavailable ? null : scoreTone(m.score);
   const stage = active.querySelector<HTMLElement>(".mdx-stage")!;
   stage.classList.remove("tone-hi", "tone-mid", "tone-lo");
   if (tone) stage.classList.add(`tone-${tone}`);
   const score = info.querySelector<HTMLElement>(".mdx-score")!;
   score.classList.remove("tone-hi", "tone-mid", "tone-lo");
   if (tone) score.classList.add(`tone-${tone}`);
-  score.textContent = m.implausible ? "–" : `${m.score.toFixed(1)} / 10`;
+  score.textContent = unavailable ? "–" : `${m.score.toFixed(1)} / 10`;
   info.querySelector(".mdx-grade")!.textContent = m.implausible
     ? "Re-check this measurement"
-    : metricScoreLabel(m.score, m.def.name);
-  info.querySelector(".mdx-rank")!.textContent = m.implausible ? "re-check" : rankShort(m.percentile);
+    : indicative ? "Indicative measurement" : metricScoreLabel(m.score, m.def.name);
+  info.querySelector(".mdx-rank")!.textContent = m.implausible ? "re-check" : indicative ? "low repeatability" : rankShort(m.percentile);
   // No population bar for an impossible reading — its marker sits at phi(z) of
   // a value that is not a face, pinned to one end and presented as a position.
   // The side deck already suppresses exactly this on its rows.
-  info.querySelector<HTMLElement>(".mdx-barhost")!.innerHTML = m.implausible ? "" : barHTML(m, opts.sex);
+  info.querySelector<HTMLElement>(".mdx-barhost")!.innerHTML = unavailable ? "" : barHTML(m, opts.sex);
   renderTab();
 
   const prev = active.querySelector<HTMLButtonElement>(".mdx-prev")!;
@@ -466,6 +458,7 @@ export function openMetricDetail(o: MetricDetailOpts): void {
     </header>
     <div class="mdx-grid">
       <div class="mdx-stage">
+        <p class="mdx-unavailable" role="status" hidden></p>
         <div class="mdx-zoom">
           <canvas class="mdx-photo"></canvas>
           <canvas class="mdx-overlay-canvas"></canvas>
@@ -515,6 +508,7 @@ export function openMetricDetail(o: MetricDetailOpts): void {
 
   // Swipe between measurements — the stage is the natural surface for it.
   const stage = wrap.querySelector<HTMLElement>(".mdx-stage")!;
+  stagePaint = createStagePaint((hidden) => stage.classList.toggle("swap", hidden));
   let downX: number | null = null;
   stage.addEventListener("pointerdown", (e) => (downX = e.clientX));
   stage.addEventListener("pointerup", (e) => {
