@@ -1,7 +1,9 @@
 import { detectVideo, initLandmarker, setRunningMode } from "../engine/landmarker.js";
 import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.js";
 import { detectOcclusion } from "../engine/occlusion.js";
-import type { FrameCheck, Viewport } from "../engine/captureGuide.js";
+import type { FrameCheck } from "../engine/captureGuide.js";
+import { faceBounds, fitFrontPreview, settleFrontPreview } from "../engine/frontFraming.js";
+import type { PreviewFit, SourceFrame } from "../engine/frontFraming.js";
 import { createPreviewCadence, createPreviewLoop } from "./previewLoop.js";
 import type { PreviewLoop } from "./previewLoop.js";
 import { isAppForeground, subscribeNativeActivity } from "../engine/nativeBridge.js";
@@ -91,18 +93,34 @@ export async function startCamera(
   let pauseVersion = 0;
   const foregroundWaiters = new Set<() => void>();
   let previewLoop: PreviewLoop | null = null;
+  let frontFit: PreviewFit | null = null;
+  let frontFitAt = 0;
+  let frontFitSize = "";
+  let lastFaceAt = 0;
+  const originalVideoStyle = opts.video.getAttribute?.("style") ?? null;
+  const reducedMotion = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const restoreVideoStyle = () => {
+    if (originalVideoStyle === null) opts.video.removeAttribute?.("style");
+    else opts.video.setAttribute?.("style", originalVideoStyle);
+    frontFit = null;
+    frontFitSize = "";
+    frontFitAt = 0;
+    lastFaceAt = 0;
+  };
   const cadence = createPreviewCadence();
   let lastFrameAt = performance.now();
 
   const constraints = (): MediaStreamConstraints => ({
     video: {
       ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: facing }),
-      // ideal, not exact: a camera that cannot reach this returns its best and
-      // the stream still opens. 1280 was leaving the video path a full stop
-      // softer than the file path for no reason, and the capture feeds the
-      // same rundown crop that magnifies it past 2x.
+      // Prefer source detail, but do not ask the front camera for a square
+      // mode. Native aspect is independent of the phone's or window's shape.
+      // These are preferences, never requirements; unsupported constraints
+      // may be ignored and the browser still chooses an available camera.
       width: { ideal: 1920 },
-      height: { ideal: 1920 },
+      ...(opts.mode === "side"
+        ? { height: { ideal: 1920 } }
+        : { resizeMode: { ideal: "none" } }),
     },
     audio: false,
   });
@@ -124,7 +142,10 @@ export async function startCamera(
       track.stop();
     });
     stream = null;
-    if (ownedPreview) opts.video.srcObject = null;
+    if (ownedPreview) {
+      opts.video.srcObject = null;
+      restoreVideoStyle();
+    }
     return ownedPreview;
   };
 
@@ -175,6 +196,7 @@ export async function startCamera(
           continue;
         }
         stream = nextStream;
+        restoreVideoStyle();
         opts.video.srcObject = nextStream;
         opts.video.muted = true;
         opts.video.playsInline = true;
@@ -414,12 +436,28 @@ export async function startCamera(
           /* a frame mid-resize can fail the readback; keep the last verdict */
         }
       }
+      const source = { width: v.videoWidth, height: v.videoHeight };
+      if (!side) {
+        const size = { width: opts.guideCanvas.clientWidth || opts.guideCanvas.width, height: opts.guideCanvas.clientHeight || opts.guideCanvas.height };
+        const sizeKey = `${source.width}:${source.height}:${size.width}:${size.height}`;
+        if (frontFitSize !== sizeKey) { frontFit = null; frontFitSize = sizeKey; }
+        const bounds = lm ? faceBounds(lm) : null;
+        if (bounds) lastFaceAt = now;
+        // Brief tracking loss does not zoom out and back on every blink.
+        // Reduced-motion keeps the initial source view stationary.
+        if (bounds || !frontFit || now - lastFaceAt > 1200) {
+          const target = fitFrontPreview(source, size, bounds);
+          frontFit = settleFrontPreview(frontFit, target, now - frontFitAt, reducedMotion);
+          applyFrontFit(v, source, size, frontFit, facing === "environment");
+        }
+        frontFitAt = now;
+      }
       const check = side
         ? checkSideFrame(result, stats)
-        : checkFrame(result, stats, viewport(v, opts.guideCanvas), glasses);
+        : checkFrame(result, stats, source, glasses);
       opts.onCheck(check);
       if (!live) return;
-      drawGuide(opts.guideCanvas, v);
+      drawGuide(opts.guideCanvas, v, side ? null : frontFit);
       cadence.measured(ts, performance.now());
     }
     if (!staleReported && now - lastFrameAt > STALE_FRAME_MS) {
@@ -524,22 +562,41 @@ function faceBox(result: ReturnType<typeof detectVideo>) {
 // centre-cropped. Mapping normalized landmarks straight to canvas pixels
 // assumes the two aspect ratios match; when they don't, the whole overlay
 // drifts off the face. Reproduce the cover crop instead.
-interface Mapper {
+export interface Mapper {
   (nx: number, ny: number): { x: number; y: number };
   dw: number;
   dh: number;
 }
 
-// How much of the video survives the cover crop. The gates are written against
-// what the user can see, so they need this rather than the raw frame.
-function viewport(video: HTMLVideoElement, canvas: HTMLCanvasElement): Viewport {
-  const w = canvas.clientWidth || canvas.width;
-  const h = canvas.clientHeight || canvas.height;
-  const P = coverMap(video, w, h);
-  return {
-    visW: Math.min(1, w / (P.dw || 1)),
-    visH: Math.min(1, h / (P.dh || 1)),
-  };
+export function frontPreviewMap(source: SourceFrame, fit: PreviewFit): Mapper {
+  const dw = source.width * fit.scale;
+  const dh = source.height * fit.scale;
+  const f = ((nx: number, ny: number) => ({ x: fit.x + nx * dw, y: fit.y + ny * dh })) as Mapper;
+  f.dw = dw;
+  f.dh = dh;
+  return f;
+}
+
+export function applyFrontFit(video: HTMLVideoElement, source: SourceFrame, viewport: SourceFrame, fit: PreviewFit, unmirrored: boolean): void {
+  // The source-aspect rectangle is transformed once on the compositor. No
+  // canvas copies, source resampling, hardware zoom or per-frame layout sizes.
+  const style = video.style;
+  if (!style) return;
+  const width = `${source.width}px`;
+  const height = `${source.height}px`;
+  if (style.width !== width || style.height !== height) {
+    style.width = width;
+    style.height = height;
+    style.inset = "auto";
+    style.left = "0";
+    style.top = "0";
+    style.objectFit = "fill";
+    style.transformOrigin = "0 0";
+  }
+  // Mirror about the viewport, not the moved video's own origin. The guide
+  // canvas mirrors about this same viewport through its existing CSS class.
+  const x = unmirrored ? fit.x : viewport.width - fit.x;
+  style.transform = `matrix(${unmirrored ? fit.scale : -fit.scale}, 0, 0, ${fit.scale}, ${x}, ${fit.y})`;
 }
 
 function coverMap(video: HTMLVideoElement, w: number, h: number): Mapper {
@@ -559,7 +616,7 @@ function coverMap(video: HTMLVideoElement, w: number, h: number): Mapper {
 // Keep the live image unobstructed. The status copy, readiness lamp and audio
 // cues provide the useful guidance; generic front/profile silhouettes and a
 // direction arrow made the camera feel busier without improving measurement.
-function drawGuide(canvas: HTMLCanvasElement, video: HTMLVideoElement): void {
+function drawGuide(canvas: HTMLCanvasElement, video: HTMLVideoElement, frontFit: PreviewFit | null = null): void {
   const w = canvas.clientWidth || canvas.width;
   const h = canvas.clientHeight || canvas.height;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -576,7 +633,7 @@ function drawGuide(canvas: HTMLCanvasElement, video: HTMLVideoElement): void {
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const P = coverMap(video, w, h);
+  const P = frontFit ? frontPreviewMap({ width: video.videoWidth, height: video.videoHeight }, frontFit) : coverMap(video, w, h);
   if (DEBUG) drawDebug(ctx, P, video, w, h, dpr);
 }
 

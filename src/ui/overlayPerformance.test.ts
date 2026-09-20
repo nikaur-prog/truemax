@@ -87,10 +87,12 @@ test("both measurement draw-on paths honour reduced motion before allocating", (
   }
 });
 
-test("side measurement hint and detail opener stay inside their own region", () => {
+test("side hints open their own region's metric, then allow browsing every side region", () => {
   const source = readFileSync(new URL("./results.ts", import.meta.url), "utf8");
   assert.match(source, /data-side-region="\$\{r.region\}"/);
   assert.match(source, /metric.def.region === hint.dataset.sideRegion/);
   assert.match(source, /x.def.region === hint.dataset.sideRegion && wasMeasured\(x\)/);
+  assert.match(source, /const deck = measurementDeck\(report.regions, "side"\)/);
+  assert.match(source, /const list = ctx \? measurementDeck\(ctx.report.regions\)/);
   assert.doesNotMatch(source, /flattering comparison you did not earn/);
 });

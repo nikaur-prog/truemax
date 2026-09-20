@@ -1,6 +1,6 @@
 # TrueMax SEO plan
 
-Status: Technical foundation implemented; production rollout and search-console setup pending
+Status: Public technical foundation and the owner's Search Console were inspected on 20 September 2026. The expanded search-content and consent-controlled analytics implementation is local, not deployed or collecting live Google Analytics data. See the [implementation and activation checklist](SEO_IMPLEMENTATION_2026-09-20.md); the [earlier audit](SEO_SEARCH_AND_ANALYTICS_2026-09-20.md) records the pre-build state.
 
 Prepared: 12 August 2026
 
@@ -20,7 +20,9 @@ Make TrueMax discoverable for high-intent face-analysis searches while keeping `
 
 The first goal is not “publish lots of articles.” It is to establish one canonical brand, make the product crawlable, explain why it is trustworthy, and measure whether organic visitors start a scan and sign up.
 
-## Current baseline
+## Historical August baseline
+
+The table below records the original audit, not the current production state. The September audit supersedes its missing-page, robots, sitemap and canonical findings. Do not repeat completed foundation work or assume the historical account/analytics status is still current.
 
 Audit performed against the production domain and the current repository on 12 August 2026.
 

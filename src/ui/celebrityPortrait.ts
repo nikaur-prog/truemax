@@ -11,6 +11,18 @@ export function celebrityPortraitImage(name: string): string {
     width="${portrait.width}" height="${portrait.height}" loading="lazy" decoding="async" referrerpolicy="no-referrer" />`;
 }
 
+/** A readable comparison portrait, never an overlay of the user's landmarks. */
+export function celebrityPortraitFigure(name: string): string {
+  const portrait = celebrityPortrait(name);
+  const photo = portrait
+    ? `<img src="${escape(portrait.src)}" alt="Reference portrait of ${escape(name)}" data-celebrity-portrait
+        width="${portrait.width}" height="${portrait.height}" loading="eager" decoding="async" referrerpolicy="no-referrer" />`
+    : "";
+  return `<span class="portrait-figure${portrait ? "" : " is-unavailable"}">
+    <span class="portrait-unavailable"${portrait ? " hidden" : ""}>Photo unavailable</span>${photo}
+  </span>`;
+}
+
 export const PORTRAIT_DISCLOSURE = "Reference photos identify each person and may differ from the photos measured. No endorsement is implied.";
 
 /** Every display context exposes its own credits without nesting links in cards. */
@@ -35,6 +47,12 @@ export function installCelebrityPortraitFallback(): void {
   fallbackInstalled = true;
   document.addEventListener("error", event => {
     const image = event.target;
-    if (image instanceof HTMLImageElement && image.matches("[data-celebrity-portrait]")) image.hidden = true;
+    if (image instanceof HTMLImageElement && image.matches("[data-celebrity-portrait]")) {
+      image.hidden = true;
+      const figure = image.closest<HTMLElement>(".portrait-figure");
+      figure?.classList.add("is-unavailable");
+      const message = figure?.querySelector<HTMLElement>(".portrait-unavailable");
+      if (message) message.hidden = false;
+    }
   }, true);
 }

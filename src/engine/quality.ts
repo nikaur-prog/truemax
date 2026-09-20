@@ -1,5 +1,7 @@
 import type { FaceLandmarkerResult, NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { landmarkIntegrityIssues } from "./geometry.js";
+import { faceBounds, frontFaceDetail } from "./frontFraming.js";
+import type { SourceFrame } from "./frontFraming.js";
 
 export interface QualityCheck {
   faceFound: boolean;
@@ -50,7 +52,7 @@ const SMILE_TOLERANCE = 0.42;
 const LEFT_FACE_EDGE = 234;
 const RIGHT_FACE_EDGE = 454;
 
-export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
+export function assessQuality(result: FaceLandmarkerResult, source?: SourceFrame): QualityCheck {
   if (!result.faceLandmarks.length) {
     return {
       faceFound: false,
@@ -99,7 +101,10 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
   );
 
   const frontal = Math.abs(yawDeg) <= YAW_TOLERANCE_DEG && Math.abs(pitchDeg) <= PITCH_TOLERANCE_DEG;
-  const largeEnough = faceWidthFrac >= MIN_FACE_WIDTH_FRAC;
+  const box = faceBounds(landmarks);
+  const largeEnough = source && box
+    ? frontFaceDetail(box, source).enough
+    : faceWidthFrac >= MIN_FACE_WIDTH_FRAC;
   const neutralExpression = smileScore <= SMILE_TOLERANCE;
 
   const issues: string[] = [];
@@ -115,7 +120,7 @@ export function assessQuality(result: FaceLandmarkerResult): QualityCheck {
     issues.push(
       `Head is ${offAxis.toFixed(0)}° off level. Jaw and chin read low from this angle. Straighten up for those to count`,
     );
-  if (!largeEnough) issues.push("Face is small in frame. Move closer or crop tighter");
+  if (!largeEnough) issues.push("The original photo has limited facial detail. Use a clearer photo or move a little closer");
   if (!neutralExpression) issues.push("Smiling detected. Expression shifts mouth and jaw measurements");
 
   return {

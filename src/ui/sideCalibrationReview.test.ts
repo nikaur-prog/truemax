@@ -28,12 +28,25 @@ test("a readable image is painted before detector preparation and placement erro
 
 test("admin calibration retains original orientation and exposes a point-only facing correction", () => {
   assert.match(flow, /if \(ctx.reviewMode !== "calibration" && seed.faceDir === -1/);
-  assert.match(flow, /data-side-direction="-1">Face points left/);
-  assert.match(flow, /data-side-direction="1">Face points right/);
+  assert.match(flow, /data-side-direction="-1"><span aria-hidden="true">←<\/span> Nose faces left/);
+  assert.match(flow, /data-side-direction="1">Nose faces right <span aria-hidden="true">→<\/span>/);
   assert.match(flow, /verifier.reset\(flipSideReviewPoints\(verifier.points, w\)\)/);
   assert.match(flow, /diagnostics: diagnostics \? structuredClone\(diagnostics\) : undefined/);
   const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
   assert.match(css, /\.side-review-tools > button\[aria-pressed="true"\] \{\s*background: var\(--acc\)/);
+});
+
+test("calibration facing explains displayed nose direction and automatically highlights the point-derived choice", () => {
+  assert.match(flow, /<legend>Which way does the nose face\?<\/legend>/);
+  assert.match(flow, /as you see it in this photo, not the person's left or right/);
+  assert.match(flow, /If the highlighted choice matches, leave it selected/);
+  assert.match(flow, /Changing it flips the starting points, not the photo/);
+  assert.match(flow, /direction\.setAttribute\("aria-describedby", "side-direction-help"\)/);
+  const facing = flow.slice(flow.indexOf('const facing = document.createElement("fieldset")'), flow.indexOf('const confirmation = document.createElement("label")'));
+  assert.match(facing, /const actual = faceDirFromPoints\(verifier!\.points\)/);
+  assert.match(facing, /button\.setAttribute\("aria-pressed", selected \? "true" : "false"\)/);
+  assert.match(facing, /paintCalibrationDirection\(\);\s*facing.appendChild\(direction\)/,
+    "the matching direction is selected before the controls mount, without a required extra click");
 });
 
 test("admin review cannot take the unverified automatic shortcut or confirm without its own explicit check", () => {

@@ -4,6 +4,14 @@ img[data-celebrity-portrait] {
   object-fit: cover; object-position: center 22%; display: block;
 }
 img[data-celebrity-portrait][hidden] { display: none !important; }
+.portrait-figure {
+  position: relative; overflow: hidden; display: grid; place-items: center; flex: none;
+  width: 88px; height: 110px; border-radius: 14px; background: var(--soft);
+}
+.portrait-unavailable { padding: 8px; text-align: center; color: var(--mut); font: 11px/1.4 var(--sans); }
+.portrait-unavailable[hidden] { display: none; }
+.mdx-celeb-values { display: block; color: var(--mut); font: 12px/1.55 var(--sans); margin-top: 8px; }
+.mdx-celeb-values b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .portrait-credits { margin: 10px 0 16px; color: var(--mut); font: 12px/1.5 var(--sans); }
 .portrait-credits summary { padding: 10px 0; min-height: 44px; box-sizing: border-box; cursor: pointer; }
 .portrait-credits a { color: inherit; text-underline-offset: 3px; overflow-wrap: anywhere; }

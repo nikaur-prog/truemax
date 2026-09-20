@@ -1,0 +1,11 @@
+.mrow:has(.metric-fit) { gap: 12px; }
+.mrow:has(.metric-fit) > b { min-width: 0; }
+.mrow:has(.metric-fit) > span { flex: none; text-align: right; }
+.mrow .metric-fit { display: block; margin-top: 3px; font: 500 10px/1.35 var(--sans); color: var(--mut); }
+.metric-fit[data-fit="within"] { color: var(--acc); }
+.mdx-fit { max-width: 100%; border: 1px solid var(--line); background: var(--soft); color: var(--mut); letter-spacing: 0; }
+.mdx-fit[data-fit="within"] { color: var(--acc); border-color: transparent; background: var(--acc-soft); }
+.mdx-modelscore { margin: 10px 0 0; color: var(--mut); font-size: 12px; line-height: 1.5; }
+.mdx-modelscore .mdx-score { display: block; padding: 0; color: var(--mut); background: none; font: 600 12px/1.5 var(--sans); letter-spacing: 0; }
+.mdx-modelscore small { display: block; margin-top: 3px; font-size: 11px; }
+.mdx-stage[data-fit="within"] { --mdx-tone: #3fd4b5; }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { interactiveRasterSize, paintPhotoCanvas, resetCanvasState, sidePointsForRaster } from "./interactiveRaster.js";
+import { interactiveRasterSize, paintPhotoCanvas, rasterSizeFor, resetCanvasState, sidePointsForRaster } from "./interactiveRaster.js";
 import { drawSideRestingPoints } from "./sideMeasureOverlay.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 
@@ -23,6 +23,14 @@ test("side raster conversion preserves normalized geometry and never mutates rev
   }
   assert.equal(JSON.stringify(points), before);
   assert.equal(sidePointsForRaster(points, 1440, 2160, 1440, 2160), points);
+});
+
+test("face auto-fit budgets overlay resolution for its actual magnification", () => {
+  const canvas = { clientWidth: 354, clientHeight: 300 } as HTMLCanvasElement;
+  const base = rasterSizeFor(canvas, 720, 1280);
+  const fitted = rasterSizeFor(canvas, 720, 1280, 3.8);
+  assert.ok(fitted.width > base.width * 3);
+  assert.ok(fitted.width <= 720 && fitted.height <= 1280);
 });
 
 test("main report photo swaps and side hover-out reuse unchanged canvas dimensions while fully resetting state", () => {

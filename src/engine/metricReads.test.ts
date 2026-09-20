@@ -95,3 +95,14 @@ test("mesh proportions and frontal jaw construction do not claim a hairline or s
   for (const text of Object.values(READ_TABLE.gonialProxy)) assert.match(text, /not the side-profile gonial angle/);
   assert.match(READ_TABLE.eyeAspectRatio.low, /does not measure hooding or eye depth/);
 });
+
+test("side reads describe their construction rather than inferred fat, volume or nose length", () => {
+  assert.match(READ_TABLE.gonialAngle.high, /does not measure jaw definition or facial fat/);
+  assert.match(READ_TABLE.gonialAngle.low, /does not establish a leaner or more defined jaw/);
+  for (const text of Object.values(READ_TABLE.gonialAngle)) assert.doesNotMatch(text, /hinge|behind the ear/);
+  for (const text of Object.values(READ_TABLE.nasalProjection)) assert.match(text, /bridge-to-chin height/);
+  for (const text of Object.values(READ_TABLE.lowerThirdDepth)) {
+    assert.match(text, /nose-base-to-chin span/);
+    assert.doesNotMatch(text, /carry real forward volume|sitting close to the neck/);
+  }
+});

@@ -2,7 +2,7 @@ import test from "node:test";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { startCamera } from "./camera.js";
+import { applyFrontFit, startCamera } from "./camera.js";
 import { bindNativeAppLifecycle } from "../engine/nativeBridge.js";
 
 function deferred<T>() {
@@ -64,12 +64,14 @@ function environment(t: TestContext) {
     play: async () => {},
   };
   const requests: Array<Promise<MediaStream>> = [];
+  const requestedConstraints: MediaStreamConstraints[] = [];
   let requested = 0;
   const globals: Record<string, unknown> = {
     document: doc,
     navigator: { mediaDevices: {
-      getUserMedia: () => {
+      getUserMedia: (constraints: MediaStreamConstraints) => {
         requested++;
+        requestedConstraints.push(constraints);
         const next = requests.shift();
         if (!next) throw new Error("Unexpected camera request");
         return next;
@@ -105,11 +107,42 @@ function environment(t: TestContext) {
     onCheck: () => { callbacks.checked++; },
     onLost: () => { callbacks.lost++; },
   });
-  return { requests, video, assignments, engine, opts, callbacks, pendingFrames, doc, modes,
+  return { requests, requestedConstraints, video, assignments, engine, opts, callbacks, pendingFrames, doc, modes,
     get requested() { return requested; }, get bootCount() { return bootCount; } };
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("front prefers native aspect without a square requirement and side keeps its existing request", async (t) => {
+  const env = environment(t);
+  env.requests.push(Promise.resolve(mediaStream().stream), Promise.resolve(mediaStream().stream));
+  const front = await startCamera(env.opts(), env.engine);
+  assert.deepEqual(env.requestedConstraints[0], { video: { facingMode: "user", width: { ideal: 1920 }, resizeMode: { ideal: "none" } }, audio: false });
+  front.stop();
+  const side = await startCamera({ ...env.opts(), mode: "side" }, env.engine);
+  assert.deepEqual(env.requestedConstraints[1], { video: { facingMode: "user", width: { ideal: 1920 }, height: { ideal: 1920 } }, audio: false });
+  side.stop();
+});
+
+test("display fitting cannot change captured resolution and stop restores the original inline style", async (t) => {
+  const env = environment(t);
+  const mutations: Array<[string, string | null]> = [];
+  const video = Object.assign(env.video, {
+    style: {} as CSSStyleDeclaration,
+    getAttribute: () => "opacity: 0.9",
+    setAttribute: (name: string, value: string) => { mutations.push([name, value]); },
+    removeAttribute: (name: string) => { mutations.push([name, null]); },
+  });
+  env.requests.push(Promise.resolve(mediaStream().stream));
+  const handle = await startCamera(env.opts(), env.engine);
+  applyFrontFit(video as unknown as HTMLVideoElement, { width: 640, height: 480 }, { width: 390, height: 844 }, { scale: 1.2, x: -30, y: 40 }, false);
+  assert.match(video.style.transform, /matrix\(-1.2/);
+  const image = handle.capture();
+  assert.equal(image?.width, 640);
+  assert.equal(image?.height, 480);
+  handle.stop();
+  assert.deepEqual(mutations[mutations.length - 1], ["style", "opacity: 0.9"]);
+});
 
 async function nativeActivity() {
   let event!: (state: { isActive: boolean }) => void;

@@ -75,6 +75,8 @@ import { LOOKS, applyEnhance, lookFor } from "./engine/enhance.js";
 import { closeCarouselCreator, openCarouselCreator } from "./ui/carouselCreator.js";
 import { decodeImageDataUrl } from "./ui/dataUrl.js";
 import { calibrationVerdictSnapshot } from "./ui/calibrationVerdict.js";
+import { CALIBRATION_TARGET_LABELS, calibrationRatingOptions, calibrationScoreComparison, calibrationScoreViewLabel, isCalibrationRatingTarget } from "./engine/calibrationComparison.js";
+import type { CalibrationRatingTarget } from "./engine/calibrationComparison.js";
 import type { CalibrationVerdictSnapshot } from "./ui/calibrationVerdict.js";
 import { setSidePriorSuspended } from "./engine/sidePrior.js";
 import { creatorFrontViewIssue } from "./engine/quickCapturePolicy.js";
@@ -82,6 +84,8 @@ import { snapshotCalibrationDiagnostics } from "./engine/calibrationDiagnostics.
 import type { CalibrationSideCapture } from "./engine/calibrationDiagnostics.js";
 import { fingerprintCalibrationImage } from "./engine/calibrationImageSource.js";
 import type { CalibrationImageSource } from "./engine/calibrationImageSource.js";
+import { calibrationFileReference, suggestedCalibrationReference, CalibrationCaptureReviewRequired } from "./engine/calibrationCaptureGuard.js";
+import type { CalibrationFileReference } from "./engine/calibrationCaptureGuard.js";
 
 // Quick scans different people, even when the operator is the account owner.
 // Never project that owner's last confirmed ear/jaw geometry onto the next
@@ -805,7 +809,10 @@ async function run(
   // one, since "a scan finished" is exactly the condition that ends a face.
   if (mode !== "calibrate") resetSexAsk();
   track("quick-scan-done");
-  if (mode === "calibrate") render(analyze(last.lm, last.w, last.h, scanSex, last.photo), last.photo);
+  if (mode === "calibrate") {
+    pendingFrontFileReference = sourceFile ? calibrationFileReference(sourceFile.name) : undefined;
+    render(analyze(last.lm, last.w, last.h, scanSex, last.photo), last.photo);
+  }
   else show(scanSex, true);
 }
 
@@ -1279,6 +1286,8 @@ let pendingFrontShot: HTMLCanvasElement | null = null;
 // which is exactly why the dual cut is exported from here and nowhere else.
 let pendingFrontLandmarks: NormalizedLandmark[] | null = null;
 let pendingFrontImageSource: CalibrationImageSource | undefined;
+let pendingFrontFileReference: CalibrationFileReference | undefined;
+let pendingSideFileReference: CalibrationFileReference | undefined;
 let pendingSidePhoto: HTMLCanvasElement | null = null;
 let pendingSidePoints: SidePoints | null = null;
 let pendingSideCapture: CalibrationSideCapture | null = null;
@@ -1353,6 +1362,8 @@ function clearPending(): void {
   pendingFrontShot = null;
   pendingFrontLandmarks = null;
   pendingFrontImageSource = undefined;
+  pendingFrontFileReference = undefined;
+  pendingSideFileReference = undefined;
   pendingSide = null;
   pendingSidePhoto = null;
   pendingSidePoints = null;
@@ -1445,12 +1456,17 @@ function renderFaceSlots(): void {
     if (!canUseOwnerTools(quickAccess, quickOwnerId)) return;
     resetCalibrationChoice();
     el.cal.classList.add("hidden");
+    let acceptedFileReference: CalibrationFileReference | undefined;
     openSideCapture({
       scanId: crypto.randomUUID(),
       // The placeholder is never used for scoring: beforeUpload must return
       // the explicit group for this file, or the load is cancelled.
       sex: (pendingFront ?? pendingSide)?.sex ?? "male",
-      beforeUpload: (file, signal) => chooseCalibrationReference(file, signal),
+      beforeUpload: async (file, signal) => {
+        const sex = await chooseCalibrationReference(file, signal);
+        if (sex && !signal.aborted) acceptedFileReference = calibrationFileReference(file.name);
+        return sex;
+      },
       onUploadCancel: resetCalibrationChoice,
       // Upload only. The live profile camera coaches a turn the operator cannot
       // see, which is the right flow for scanning yourself and the wrong one for
@@ -1460,6 +1476,7 @@ function renderFaceSlots(): void {
       onDone: (report, points, faceDir, review) => {
         closeSideFlow();
         pendingSide = report;
+        pendingSideFileReference = acceptedFileReference;
         // Held for the Dual-View export, cleared with the rest of the pending
         // face. The correction upload below consumes the same pair without
         // owning it.
@@ -1544,30 +1561,34 @@ function renderFaceSlots(): void {
 function renderRatingEdit(id: string): void {
   const face = loadCalibrationSet().find((f) => f.id === id);
   if (!face) return renderCalibrationSet();
+  const comparison = calibrationScoreComparison(face);
+  const unrated = face.rating === null;
 
-  el.calStep.textContent = "Change a rating";
+  el.calStep.textContent = unrated ? "Add a rating for review" : "Change a rating";
   el.calBody.innerHTML = `
     <div class="q-cal-rate">
       <p class="q-cal-ask">${face.label ? escapeHtml(face.label) : face.id}:
       you said ${face.rating === null ? "nothing" : face.rating.toFixed(1)},
-      the engine said ${face.scored.toFixed(1)}.</p>
+      ${calibrationScoreViewLabel(comparison.view).toLowerCase()}: ${comparison.score?.toFixed(1) ?? "not available"}.</p>
       <div class="q-cal-input">
         <input type="number" id="q-edit-num" min="1" max="10" step="0.1" inputmode="decimal"
                value="${face.rating ?? ""}" autocomplete="off" />
       </div>
-      <p class="q-cal-hint">Why is it changing? This decides whether the row can still
+      ${unrated ? `<p class="q-cal-hint">This capture was saved without a rating. The result is now visible,
+      so a rating added here is kept for review only, not for fitting the scoring model.</p>`
+        : `<p class="q-cal-hint">Why is it changing? This decides whether the row can still
       be fitted against, and it is the whole reason the rating box comes before the
-      verdict.</p>
+      verdict.</p>`}
       <div class="q-actions">
-        <button type="button" class="btn pri" id="q-edit-typo">I mistyped it</button>
-        <button type="button" class="btn gho" id="q-edit-mind">I changed my mind</button>
+        ${unrated ? "" : `<button type="button" class="btn pri" id="q-edit-typo">I mistyped it</button>`}
+        <button type="button" class="btn ${unrated ? "pri" : "gho"}" id="q-edit-mind">${unrated ? "Save rating for review" : "I changed my mind"}</button>
       </div>
-      <p class="q-cal-hint"><b>Mistyped</b> means the number you meant was always this one:
-      nothing was learned from the engine, so the row stays in the fit.
+      ${unrated ? "" : `<p class="q-cal-hint"><b>Mistyped</b> means the number you meant was always this one:
+      nothing was learned from the engine, so its existing source and fitting eligibility are preserved.
       <b>Changed my mind</b> means the engine's number moved yours. That is worth keeping as a
       record and worth nothing as a target: a corpus fitted to numbers the engine suggested
       would agree with itself perfectly and measure nothing. The row is kept, marked, and left
-      out of the export.</p>
+      out of the fitting export.</p>`}
       <p class="q-cal-msg" id="q-edit-msg" role="status"></p>
       <button type="button" class="q-slot-back" id="q-edit-back">Back to the set</button>
     </div>`;
@@ -1589,7 +1610,8 @@ function renderRatingEdit(id: string): void {
       msg.textContent = "That change was not saved. Device storage is unavailable; your earlier rating is unchanged.";
     }
   };
-  document.getElementById("q-edit-typo")!.onclick = () => commit(true);
+  const typo = document.getElementById("q-edit-typo");
+  if (typo) typo.onclick = () => commit(true);
   document.getElementById("q-edit-mind")!.onclick = () => commit(false);
   document.getElementById("q-edit-back")!.onclick = () => renderCalibrationSet();
 }
@@ -1641,6 +1663,7 @@ async function wireSaveFolder(): Promise<void> {
 }
 
 function renderRatingStep(r: Report): void {
+  const defaultTarget: CalibrationRatingTarget = pendingFront && pendingSide ? "combined" : pendingFront ? "front" : "side";
   el.calStep.textContent = "Your rating";
   el.calBody.innerHTML = `
     <div class="q-cal-rate">
@@ -1654,28 +1677,57 @@ function renderRatingStep(r: Report): void {
                maxlength="32" pattern="[a-z]([a-z0-9_]|-){0,31}" autocapitalize="none" spellcheck="false" autocomplete="off" />
         <input type="text" id="q-cal-label" placeholder="Label (optional, never exported)"
                maxlength="40" autocomplete="off" />
-        <button type="button" class="btn pri" id="q-cal-save">Save face</button>
       </div>
       <p class="q-cal-hint" id="q-cal-reference-hint">Use an anonymous Reference ID such as f01 to match this capture to your image set.
-      The ID is included in capture diagnostics; names, emails and the private label are not. Never put personal information in the ID.</p>
+      Recognised pilot filenames can suggest this ID; check it before saving. The ID is included in capture diagnostics;
+      names, emails and the private label are not. Never put personal information in the ID.</p>
       <p class="q-cal-hint">Don't stretch a rating to fill the scale. An uncertain number
       is less useful than an unrated capture with carefully checked points.</p>
       <label class="q-cal-prov">
         <input type="checkbox" id="q-cal-external" />
         <span>This rating comes from another app.</span>
       </label>
+      <label class="q-cal-hint" for="q-cal-target">What does this rating describe?</label>
+      <select id="q-cal-target" aria-describedby="q-cal-target-hint">
+        ${calibrationRatingOptions(Boolean(pendingFront), Boolean(pendingSide))}
+      </select>
+      <p class="q-cal-hint" id="q-cal-target-hint">Choose the same view as the rating you enter.
+      Another app's total can include skin or other factors, so it is context rather than a like-for-like geometry target.</p>
       <p class="q-cal-hint">External ratings stay in the diagnostic export for comparison.
       They are not independent human labels and are excluded from the fitting corpus.
       Saving a capture does not update the live scoring model.</p>
       <p class="q-cal-hint">Reference group: <b>${r.sex === "female" ? "women" : "men"}</b>. Both views use this group.</p>
+      <div id="q-cal-capture-warning" class="q-cal-hint hidden" role="alert">
+        <p>Check this capture before saving:</p>
+        <ul id="q-cal-capture-warning-list"></ul>
+        <label class="q-cal-prov"><input type="checkbox" id="q-cal-capture-confirm" />
+        <span>I checked the photos, Reference ID and reference group. Save this intentional exception as a separate review capture.</span></label>
+        <p>Exceptions stay in diagnostics, but are excluded from automatic score fitting. Existing rows will not be replaced.</p>
+      </div>
+      <button type="button" class="btn pri" id="q-cal-save">Save face</button>
       <button type="button" class="btn gho" id="q-cal-back-to-views">Back to photos and reference group</button>
       <p class="q-cal-msg" id="q-cal-msg" role="status"></p>
     </div>`;
 
   const num = document.getElementById("q-cal-num") as HTMLInputElement;
   const reference = document.getElementById("q-cal-reference") as HTMLInputElement;
+  reference.value = suggestedCalibrationReference({ front: pendingFrontFileReference, side: pendingSideFileReference }) ?? "";
+  const captureConfirm = document.getElementById("q-cal-capture-confirm") as HTMLInputElement;
+  const captureWarning = document.getElementById("q-cal-capture-warning")!;
+  const captureWarningList = document.getElementById("q-cal-capture-warning-list")!;
+  let warningSignature = "";
+  let displayedWarningCodes: string[] = [];
+  reference.oninput = () => {
+    captureConfirm.checked = false;
+    captureWarning.classList.add("hidden");
+    warningSignature = "";
+    displayedWarningCodes = [];
+  };
   const label = document.getElementById("q-cal-label") as HTMLInputElement;
   const external = document.getElementById("q-cal-external") as HTMLInputElement;
+  const target = document.getElementById("q-cal-target") as HTMLSelectElement;
+  external.onchange = () => { target.value = external.checked ? "external-overall" : defaultTarget; };
+  target.onchange = () => { if (target.value === "external-overall") external.checked = true; };
   const msg = document.getElementById("q-cal-msg")!;
   document.getElementById("q-cal-back-to-views")!.onclick = renderFaceSlots;
   num.focus();
@@ -1700,6 +1752,8 @@ function renderRatingStep(r: Report): void {
         sidePhoto: pendingSidePhoto,
         sidePoints: pendingSidePoints,
       });
+      if (!isCalibrationRatingTarget(target.value)) throw new Error("Choose what this rating describes before saving.");
+      verdict.ratingTarget = target.value;
       addRatedFace(
         r,
         rating,
@@ -1711,7 +1765,11 @@ function renderRatingStep(r: Report): void {
         verdict.additionalSide ?? undefined,
         {
           referenceId,
+          ratingTarget: verdict.ratingTarget,
+          captureScores: verdict.captureScores,
           thumb: pendingFrontShot ? (toAvatarThumb(pendingFrontShot) ?? undefined) : undefined,
+          fileReferences: { front: pendingFrontFileReference, side: pendingSideFileReference },
+          acknowledgedCaptureWarnings: captureConfirm.checked && !captureWarning.classList.contains("hidden") ? displayedWarningCodes : [],
           suspect: verdict.suspect,
           diagnostics: snapshotCalibrationDiagnostics({
             build: __BUILD__,
@@ -1730,6 +1788,19 @@ function renderRatingStep(r: Report): void {
       clearPending();
       renderVerdictStep(r, rating, verdict);
     } catch (error) {
+      if (error instanceof CalibrationCaptureReviewRequired) {
+        const signature = JSON.stringify(error.warnings);
+        if (signature !== warningSignature) captureConfirm.checked = false;
+        warningSignature = signature;
+        displayedWarningCodes = error.warnings.map(({ code }) => code);
+        captureWarningList.replaceChildren(...error.warnings.map(({ message }) => {
+          const item = document.createElement("li");
+          item.textContent = message;
+          return item;
+        }));
+        captureWarning.classList.remove("hidden");
+        captureConfirm.focus();
+      }
       msg.textContent = error instanceof Error
         ? `${error.message} Your capture is still open.`
         : "This face was not saved. Device storage may be full or unavailable. Your capture is still open; export the saved set before clearing space, then try again.";
@@ -1761,36 +1832,32 @@ function renderRatingStep(r: Report): void {
 function renderVerdictStep(r: Report, rating: number | null, capture: CalibrationVerdictSnapshot): void {
   const side = capture.additionalSide;
   const withSide = capture.hasSide;
-  const gap = rating === null ? null : r.overall - rating;
-  // Named rather than left as a number. "−2.3" is a figure; "the engine is
-  // two points below you on this face" is the thing worth acting on, and the
-  // whole set is a list of these.
-  //
-  // A skipped face has no disagreement to name, and inventing one by showing
-  // the engine's number alone would quietly turn this screen into the thing
-  // the skip exists to avoid: a place where the engine's opinion becomes the
-  // reference. It says what was stored and nothing else.
-  const verdict =
-    gap === null
-      ? null
-      : Math.abs(gap) < 0.6 ? "agrees with you" : gap > 0 ? "is too generous here" : "is too harsh here";
+  const comparison = calibrationScoreComparison({ rating, scored: r.overall, ratingTarget: capture.ratingTarget, captureScores: capture.captureScores });
+  const gap = comparison.difference;
+  // Compare the requested scope, not a front score against an unlabelled total.
+  // Agreement is a numerical difference, never a claim of measurement accuracy.
   el.calStep.textContent = "Saved";
   el.calBody.innerHTML = `
     <div class="q-cal-verdict">
       ${
         gap === null
-          ? `<p class="q-cal-said">Stored without a rating. Its measurements${
+          ? `<p class="q-cal-said">${rating === null ? "Stored without a rating." : "Rating stored; a matching view score is unavailable."} Its measurements${
               withSide ? " and side corrections are" : " are"
             } kept; it sits out of the agreement fit.</p>`
           : `<div class="q-cal-pair">
-        <div><span>YOU</span><b>${rating!.toFixed(1)}</b></div>
+        <div><span>ENTERED RATING</span><b>${rating!.toFixed(1)}</b></div>
         <div class="q-cal-gap">${gap >= 0 ? "+" : ""}${gap.toFixed(1)}</div>
-        <div><span>ENGINE</span><b>${r.overall.toFixed(1)}</b></div>
+        <div><span>TRUEMAX ${calibrationScoreViewLabel(comparison.view).toUpperCase()}</span><b>${comparison.score!.toFixed(1)}</b></div>
       </div>
-      <p class="q-cal-said">It ${verdict}.${
-        side ? " Front and side both stored." : ""
-      }</p>`
+      <p class="q-cal-said">${comparison.sameScope
+        ? "Numerical difference only, not a validation result."
+        : "Context only: another app's total may score different factors."}${side ? " Front and side both stored." : ""}</p>`
       }
+      <p class="q-cal-hint">${([
+        ["front", "Front"], ["side", "Side"], ["combined", "Front + side"],
+      ] as const).filter(([key]) => Number.isFinite(capture.captureScores[key]))
+        .map(([key, label]) => `${label}: ${capture.captureScores[key]!.toFixed(1)}`).join(" · ")}</p>
+      <p class="q-cal-hint">${capture.ratingTarget ? `Rating scope: ${CALIBRATION_TARGET_LABELS[capture.ratingTarget]}. ` : ""}Saved for review. Scoring has not changed.</p>
       <div class="q-actions">
         <button class="btn pri" id="q-cal-next">Next face</button>
         <button class="btn gho" id="q-cal-diag">Copy diagnostics</button>
@@ -1886,7 +1953,8 @@ function renderVerdictStep(r: Report, rating: number | null, capture: Calibratio
  * evidence of that.
  */
 function gapOf(f: RatedFace): number {
-  return f.rating === null ? -1 : Math.abs(f.scored - f.rating);
+  const comparison = calibrationScoreComparison(f);
+  return comparison.difference === null ? -1 : Math.abs(comparison.difference);
 }
 
 function renderCalibrationSet(): void {
@@ -1950,7 +2018,8 @@ function renderCalibrationSet(): void {
       ${
         withheld.length
           ? `<p class="q-cal-missing">${withheld.length} row${withheld.length === 1 ? "" : "s"}
-             excluded from the fitting corpus because the rating is absent, external, revised or unknown.
+             excluded from the front fitting corpus because the rating is absent, external, revised, unknown,
+             does not explicitly describe the front view, or has a reviewed capture exception.
              All remain in the diagnostic export. Use "mine" only when you remember giving
              that rating independently, before seeing the engine's result.</p>`
           : ""
@@ -1958,14 +2027,15 @@ function renderCalibrationSet(): void {
       ${
         faces.length
           ? `<div class="q-cal-rows">
-              <div class="q-cal-row q-cal-head"><span>FACE</span><span>YOU</span><span>ENGINE</span><span>GAP</span><span></span></div>
+              <div class="q-cal-row q-cal-head"><span>FACE</span><span>RATING</span><span>TRUEMAX</span><span>DIFFERENCE</span><span></span></div>
               ${[...faces]
                 // Unrated rows sort last rather than crashing the comparator.
                 // They have no disagreement to rank by, which is the whole
                 // point of the column.
                 .sort((a, b) => gapOf(b) - gapOf(a))
                 .map((f) => {
-                  const gap = f.rating === null ? null : f.scored - f.rating;
+                  const comparison = calibrationScoreComparison(f);
+                  const gap = comparison.difference;
                   // Four states now. The middle two are the whole point: a row
                   // whose provenance nobody recorded is not the same as one
                   // known to be the operator's own, and a row with no rating at
@@ -1980,7 +2050,7 @@ function renderCalibrationSet(): void {
                           : f.ratedBy === "revised"
                             ? ` <em class="q-cal-flag">revised after the score</em>`
                             : ` <em class="q-cal-flag">unknown</em>`;
-                  const fittable = f.ratedBy === "self" && f.rating !== null;
+                  const fittable = own.some((candidate) => candidate.id === f.id);
                   // The audit trail, in the row: the face itself, and a flag
                   // when any of its readings fell outside anatomical range at
                   // capture. A corpus row with misplaced points poisons the
@@ -1989,15 +2059,17 @@ function renderCalibrationSet(): void {
                   const suspectFlag = f.suspect
                     ? ` <em class="q-cal-flag bad">${f.suspect} reading${f.suspect === 1 ? "" : "s"} need review</em>`
                     : "";
+                  const captureFlag = f.captureReview?.acknowledgedWarnings?.length
+                    ? ` <em class="q-cal-flag">reviewed capture exception</em>` : "";
                   return `<div class="q-cal-row${fittable ? "" : " held"}">
                     <span>${
                       f.thumb ? `<img class="q-cal-thumb" src="${f.thumb}" alt="" />` : `<i class="q-cal-thumb none"></i>`
-                    }${f.label ? `${escapeHtml(f.label)} <small>(${f.id})</small>` : f.id}${validCalibrationReferenceId(f.referenceId) ? ` <small>Ref: ${escapeHtml(f.referenceId)}</small>` : ""}${flag}${suspectFlag}</span>
-                    <span>${f.rating === null ? "–" : f.rating.toFixed(1)}</span>
-                    <span>${f.scored.toFixed(1)}</span>
+                    }${f.label ? `${escapeHtml(f.label)} <small>(${f.id})</small>` : f.id}${validCalibrationReferenceId(f.referenceId) ? ` <small>Ref: ${escapeHtml(f.referenceId)}</small>` : ""}${flag}${suspectFlag}${captureFlag}</span>
+                    <span>${f.rating === null ? "–" : f.rating.toFixed(1)}<small>${f.ratingTarget && isCalibrationRatingTarget(f.ratingTarget) ? CALIBRATION_TARGET_LABELS[f.ratingTarget] : "Scope unknown"}</small></span>
+                    <span>${comparison.score?.toFixed(1) ?? "–"}<small>${calibrationScoreViewLabel(comparison.view)}</small></span>
                     <span class="${gap !== null && Math.abs(gap) >= 1.5 ? "bad" : ""}">${
                       gap === null ? "–" : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)}`
-                    }</span>
+                    }${gap !== null && !comparison.sameScope ? "<small>Context only</small>" : ""}</span>
                     <span class="q-cal-acts">${
                       f.ratedBy === undefined && f.rating !== null
                         ? `<button type="button" class="linkish" data-mine="${f.id}">mine</button>`

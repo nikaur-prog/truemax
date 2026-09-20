@@ -20,8 +20,8 @@ export function interactiveRasterSize(
 }
 
 /** Layout is read once per interaction, never inside the animation loop. */
-export function rasterSizeFor(canvas: HTMLCanvasElement, width: number, height: number) {
-  return interactiveRasterSize(width, height, canvas.clientWidth, canvas.clientHeight,
+export function rasterSizeFor(canvas: HTMLCanvasElement, width: number, height: number, displayScale = 1) {
+  return interactiveRasterSize(width, height, canvas.clientWidth * displayScale, canvas.clientHeight * displayScale,
     typeof window === "undefined" ? 1 : window.devicePixelRatio);
 }
 

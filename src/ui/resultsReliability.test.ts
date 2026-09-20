@@ -22,7 +22,7 @@ test("result photos retain an encoded source and restore on every mobile return 
 });
 
 test("main report drawing uses display rasters without changing retained photo or reviewed coordinates", () => {
-  assert.match(results, /function frontRaster\([\s\S]*?rasterSizeFor\(ctx!\.overlay, ctx!\.photoW, ctx!\.photoH\)/);
+  assert.match(results, /function frontRaster\([\s\S]*?rasterSizeFor\(ctx!\.overlay, ctx!\.photoW, ctx!\.photoH, fittedPhotoScale\)/);
   assert.match(results, /sidePointsForRaster\(ctx\.sidePoints, ctx\.sidePhoto\.width, ctx\.sidePhoto\.height, width, height\)/);
   // The full-size values remain for retained photos, diagnostic geometry and
   // normalized bounds, but must not drive animated drawing anymore.
@@ -59,8 +59,11 @@ test("mobile photographs stay full-sized and category navigation owns stickiness
   assert.doesNotMatch(styles, /\.pane-photo\.shrunk/);
   assert.match(styles, /\.topbar\.report-compact/);
   assert.match(styles, /var\(--report-header-h, 38px\) \+ var\(--report-photo-h, 28svh\)/);
-  assert.match(styles, /var\(--face-x, center\)/);
-  assert.match(styles, /var\(--face-y, 40%\)/);
+  assert.match(styles, /object-position: 50% 50%/);
+  assert.match(results, /resultPhotoFrame\(photoPointBounds\(points\)/);
+  assert.match(results, /element\.style\.transform = resultPhotoTransform\(frame\)/);
+  assert.match(styles, /--report-frame-h: clamp\(190px, 38svh, 340px\)/);
+  assert.match(styles, /@media \(max-width: 850px\) and \(max-height: 500px\)[\s\S]*?report-photo-pinned \{ position: static; \}/);
 });
 
 test("mobile correction actions do not truncate their labels", () => {

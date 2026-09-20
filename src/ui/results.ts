@@ -20,10 +20,12 @@ import { animateMeasurement, drawMeasurement, measurementBounds, transitionMeasu
 import type { OverlayFade } from "./measureOverlay.js";
 import { animateSideMeasurement, drawSideMeasurement, drawSideRestingPoints, hasSideOverlay, sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { paintPhotoCanvas, rasterSizeFor, sidePointsForRaster } from "./interactiveRaster.js";
-import { closeMetricDetail, isMetricDetailOpen, openMetricDetail } from "./metricDetail.js";
+import { closeMetricDetail, isMetricDetailOpen, measurementDeck, openMetricDetail } from "./metricDetail.js";
+import { metricFitHTML } from "./metricFit.js";
 import { PILLAR_BLURB, pillarDeck } from "./pillarDeck.js";
 import { commitProtocol, offerProtocol, protocolFor, readProtocols, startKindFor, writeProtocols } from "../engine/protocol.js";
-import { IDENTITY_ZOOM, applyCanvasZoom as applyZoom, zoomToBounds } from "./zoomTransform.js";
+import { IDENTITY_ZOOM, applyCanvasZoom, zoomToBounds } from "./zoomTransform.js";
+import { photoPointBounds, resultPhotoFrame, resultPhotoTransform } from "./resultPhotoFraming.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import type { CeilingInput } from "./ceilingCta.js";
 import { coachRead, deltaReadingCopy, overviewCaveat, fmt, wasMeasured, leverFor, lockedCopy, percentileLine, rankShort, populationLine, regionSummary, scoreHigherText, topPctText } from "./templates.js";
@@ -152,6 +154,9 @@ let ctx: Ctx | null = null;
 let photoRecovery: CanvasRecoveryHandle | null = null;
 let detachReportRail: (() => void) | null = null;
 let detachTabScrollbar: (() => void) | null = null;
+let detachPhotoFraming: (() => void) | null = null;
+let requestedPhotoZoom: ZoomSpec = IDENTITY_ZOOM;
+let fittedPhotoScale = 1;
 let detachMorphPreview: (() => void) | null = null;
 let resultOwner: string | null = null;
 let goalDraft: GoalTargetDraft | null = null;
@@ -164,6 +169,8 @@ export function clearResultPhotoRecovery(): void {
   detachReportRail = null;
   detachTabScrollbar?.();
   detachTabScrollbar = null;
+  detachPhotoFraming?.();
+  detachPhotoFraming = null;
   toggleObserver?.disconnect();
   toggleObserver = null;
 }
@@ -209,6 +216,8 @@ export function renderResults(c: Ctx): void {
   installCelebrityPortraitFallback();
   clearResultPhotoRecovery();
   ctx = c;
+  requestedPhotoZoom = IDENTITY_ZOOM;
+  fittedPhotoScale = 1;
   resultOwner = activeScanOwner();
   goalDraft = null;
   if (adultUser && !observationsOnly() && resultOwner?.startsWith("user:")) {
@@ -331,6 +340,24 @@ export function renderResults(c: Ctx): void {
   // The initial mount does not scroll: main.ts owns where the page sits when
   // the results arrive, and a second scroll from here would fight it.
   select("overall", undefined, { silent: true });
+  // The responsive stage can resize on rotation or when browser chrome opens.
+  // Refit from source coordinates, never from already-transformed bounds.
+  let framingFrame = 0;
+  const scheduleFraming = () => {
+    if (!framingFrame) framingFrame = requestAnimationFrame(() => {
+      framingFrame = 0;
+      if (ctx === c) applyZoom(c.zoomable, requestedPhotoZoom);
+    });
+  };
+  const framingObserver = new ResizeObserver(scheduleFraming);
+  if (c.zoomable.parentElement) framingObserver.observe(c.zoomable.parentElement);
+  window.addEventListener("resize", scheduleFraming, { passive: true });
+  scheduleFraming();
+  detachPhotoFraming = () => {
+    framingObserver.disconnect();
+    window.removeEventListener("resize", scheduleFraming);
+    if (framingFrame) cancelAnimationFrame(framingFrame);
+  };
 }
 
 // Which half of the scan the tab row is currently describing.
@@ -811,12 +838,12 @@ let transition: { cancel(): void } | null = null;
 // not need to. Keep the static photo and export sources at their original size,
 // while drawing the interactive construction at the displayed stage's density.
 function frontRaster(): { width: number; height: number } {
-  return rasterSizeFor(ctx!.overlay, ctx!.photoW, ctx!.photoH);
+  return rasterSizeFor(ctx!.overlay, ctx!.photoW, ctx!.photoH, fittedPhotoScale);
 }
 
 function sideRaster(): { points: SidePoints; width: number; height: number } | null {
   if (!ctx?.sidePhoto || !ctx.sidePoints) return null;
-  const { width, height } = rasterSizeFor(ctx.overlay, ctx.sidePhoto.width, ctx.sidePhoto.height);
+  const { width, height } = rasterSizeFor(ctx.overlay, ctx.sidePhoto.width, ctx.sidePhoto.height, fittedPhotoScale);
   return {
     width,
     height,
@@ -937,47 +964,34 @@ function mobileRegionFocused(): boolean {
   );
 }
 
-function frontFaceCenter(): { x: number; y: number } {
-  if (!ctx?.landmarks.length) return { x: 50, y: 40 };
-  let minX = 1;
-  let maxX = 0;
-  let minY = 1;
-  let maxY = 0;
-  for (const point of ctx.landmarks) {
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
-    minX = Math.min(minX, point.x);
-    maxX = Math.max(maxX, point.x);
-    minY = Math.min(minY, point.y);
-    maxY = Math.max(maxY, point.y);
-  }
-  return { x: ((minX + maxX) / 2) * 100, y: ((minY + maxY) / 2) * 100 };
-}
-
-function sideFaceCenter(): { x: number; y: number } {
-  if (!ctx?.sidePoints || !ctx.sidePhoto) return { x: 50, y: 42 };
-  const points = Object.values(ctx.sidePoints);
-  if (!points.length) return { x: 50, y: 42 };
-  let minX = ctx.sidePhoto.width;
-  let maxX = 0;
-  let minY = ctx.sidePhoto.height;
-  let maxY = 0;
-  for (const point of points) {
-    minX = Math.min(minX, point.x);
-    maxX = Math.max(maxX, point.x);
-    minY = Math.min(minY, point.y);
-    maxY = Math.max(maxY, point.y);
-  }
-  return {
-    x: ((minX + maxX) / 2 / ctx.sidePhoto.width) * 100,
-    y: ((minY + maxY) / 2 / ctx.sidePhoto.height) * 100,
-  };
-}
-
 function setFaceCrop(which: "front" | "side"): void {
-  if (!ctx) return;
-  const centre = which === "side" ? sideFaceCenter() : frontFaceCenter();
-  ctx.zoomable.style.setProperty("--face-x", `${centre.x.toFixed(2)}%`);
-  ctx.zoomable.style.setProperty("--face-y", `${centre.y.toFixed(2)}%`);
+  if (!ctx || which !== shownPhoto) return;
+  if (window.matchMedia("(max-width: 850px)").matches) applyZoom(ctx.zoomable, requestedPhotoZoom);
+}
+
+/** A stable whole-face crop on phones; desktop keeps its existing region zooms. */
+function applyZoom(element: HTMLElement, spec: ZoomSpec): void {
+  requestedPhotoZoom = spec;
+  if (!ctx || !window.matchMedia("(max-width: 850px)").matches) {
+    fittedPhotoScale = 1;
+    applyCanvasZoom(element, spec);
+    return;
+  }
+  const source = shownPhoto === "side" ? ctx.sidePhoto : frontPhoto;
+  const canvas = element.querySelector("canvas");
+  if (!source || !canvas) return applyCanvasZoom(element, spec);
+  const points = shownPhoto === "side"
+    ? Object.values(ctx.sidePoints ?? {}).map(p => ({ x: p.x / source.width, y: p.y / source.height }))
+    : ctx.landmarks;
+  const frame = resultPhotoFrame(photoPointBounds(points), {
+    imageWidth: source.width, imageHeight: source.height,
+    boxWidth: canvas.clientWidth, boxHeight: canvas.clientHeight,
+  });
+  fittedPhotoScale = frame.scale;
+  // Keep this preview steady during taps. Close-up measurement navigation is
+  // available in the detail sheet, with more room for construction labels.
+  element.style.transformOrigin = "0 0";
+  element.style.transform = resultPhotoTransform(frame);
 }
 
 // Repaint the visible pane only after canvasRecovery has rebuilt both hidden
@@ -1070,7 +1084,7 @@ function calmSide(): void {
   transition?.cancel();
   transition = null;
   shownRegion = null;
-  ctx.zoomable.style.transform = "none";
+  applyZoom(ctx.zoomable, IDENTITY_ZOOM);
   setFaceCrop("side");
   drawSidePoints();
 }
@@ -1174,9 +1188,7 @@ function openPillarSheet(report: Report, pillar: PillarId): void {
           (m, i) => `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}${
             m.implausible ? " implausible" : ""
           }" data-pillar-row="${i}" style="animation-delay:${Math.min(i * 20, 100)}ms">
-        <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}<span class="mscore">${
-          m.implausible || isIndicative(m) ? "–" : m.score.toFixed(1)
-        }</span></span></div>
+        <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}${metricFitHTML(m, sex)}</span></div>
         <div class="psx-where">${REGION_NAMES[m.def.region] ?? m.def.region}</div>
         ${
           // An impossible reading has no position to place, exactly as on the
@@ -1274,9 +1286,7 @@ function wireSideMeasurementTaps(report: Report): void {
 
   const openDetail = (metric: ScoredMetric) => {
     if (!ctx) return;
-    const region = report.regions.find((x) => x.region === metric.def.region);
-    if (!region) return;
-    const deck = region.metrics.filter(wasMeasured);
+    const deck = measurementDeck(report.regions, "side");
     // Rows are wired for every metric with a recipe, but the deck holds only
     // the measured ones — so a row whose value is non-finite is not in it.
     // Math.max(0, -1) would open a DIFFERENT measurement under the tapped
@@ -1284,7 +1294,8 @@ function wireSideMeasurementTaps(report: Report): void {
     const at = deck.findIndex((m) => m.def.id === metric.def.id);
     if (at < 0) return;
     openMetricDetail({
-      region: region.region,
+      region: metric.def.region,
+      deckLabel: "Side measurements",
       metrics: deck,
       index: at,
       sex: report.sex,
@@ -1862,11 +1873,7 @@ function sideRegionDeck(r: RegionScore, report: Report): string {
       ${r.metrics
         .map(
           (m, i) => `<div class="metric${hasSideOverlay(m.def.id) ? " tappable" : ""}${m.implausible ? " implausible" : ""}" data-side-metric="${m.def.id}" style="animation-delay:${Math.min(i * 20, 100)}ms">
-        <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}${
-          m.implausible
-            ? `<span class="mscore mscore-skip">not scored</span>`
-            : `<span class="mscore">${m.score.toFixed(1)}</span>`
-        }</span></div>
+        <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}${metricFitHTML(m, report.sex)}</span></div>
         ${
           m.implausible
             ? `<p class="mimplausible">${Number.isFinite(m.value) ? `This reading needs checking. Review ${pointLabels(m)}.` : "Not measured: a required point or part of the geometry is unavailable."} It has been left out of the score.</p>`
@@ -2221,13 +2228,13 @@ function animateOverview(root: HTMLElement): void {
 // person's actual metric names and scores rather than lorem, so the blur is
 // showing them their own analysis rather than a decorative placeholder — the
 // count of rows is true, and that is the honest part of the pitch.
-function regionPreviewHTML(r: RegionScore, id: RegionId): string {
+function regionPreviewHTML(r: RegionScore, id: RegionId, sex: Sex): string {
   return `<div class="deck"><div class="dcard">
     <h3>${regionHeadline(r, id)}<em>MEASURED</em></h3>
     ${r.metrics
       .map(
         (m) => `<div class="metric">
-          <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}<span class="mscore">${m.score.toFixed(1)}</span></span></div>
+          <div class="mrow"><b>${m.def.name}</b><span>${fmt(m)}${metricFitHTML(m, sex)}</span></div>
         </div>`,
       )
       .join("")}
@@ -2245,7 +2252,7 @@ function showRegion(id: RegionId): void {
   // because the amount of work in there is the thing being sold and hiding it
   // entirely sells nothing.
   if (depth === "rating") {
-    body().innerHTML = `<div class="reveal">${locked(regionPreviewHTML(r, id))}</div>`;
+    body().innerHTML = `<div class="reveal">${locked(regionPreviewHTML(r, id, ctx.report.sex))}</div>`;
     wireUnlock();
     return;
   }
@@ -2272,7 +2279,7 @@ function showRegion(id: RegionId): void {
             .map(
               (m, i) => wasMeasured(m)
                 ? `<div class="metric tappable${isIndicative(m) ? " indicative" : ""}" data-metric="${m.def.id}" style="animation-delay:${Math.min(i * 20, 100)}ms">
-            <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}${isIndicative(m) ? "" : `<span class="mscore">${m.score.toFixed(1)}</span>`}</span></div>
+            <div class="mrow"><b>${m.def.name}${indicativeTag(m)}</b><span>${fmt(m)}${metricFitHTML(m, ctx!.report.sex)}</span></div>
             ${isIndicative(m) ? "" : `<div class="rangebar">${idealWindow(m, ctx!.report.sex)}<i data-l="${m.markerPct}" style="left:${m.markerPct}%"></i></div>`}
             ${!isIndicative(m) && metricRead(m, ctx!.report.sex) ? `<p class="metric-summary">On this photo: ${metricRead(m, ctx!.report.sex)}.</p>` : ""}</div>`
                 // Not measured on this photograph. It keeps its row and says so,
@@ -2431,15 +2438,19 @@ function wireMeasurementTaps(r: RegionScore, region: RegionId): void {
       : HINT_IDLE;
   };
 
-  // The deck the detail view walks: what is measured, in the order shown.
-  const list = r.metrics.filter(wasMeasured);
+  // Keep the report's order, including the next region. A region is an entry
+  // point, not a reason to close the sheet before inspecting another feature.
+  const list = ctx ? measurementDeck(ctx.report.regions) : [];
   const openDetail = (id: string | null) => {
     if (!ctx || !list.length) return;
-    const at = id ? list.findIndex((m) => m.def.id === id) : 0;
+    const target = id ?? r.metrics.find(wasMeasured)?.def.id;
+    const at = list.findIndex((m) => m.def.id === target);
+    if (at < 0) return;
     openMetricDetail({
       region,
+      deckLabel: "All measurements",
       metrics: list,
-      index: Math.max(0, at),
+      index: at,
       sex: ctx.report.sex,
       landmarks: ctx.landmarks,
       frontPhoto: frontPhoto,

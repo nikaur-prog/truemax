@@ -103,17 +103,25 @@ test("the front review copy is bounded instead of duplicating a full phone canva
   assert.deepEqual(scanConfirmPreviewSize(0, 0), { width: 0, height: 0 });
 });
 
-test("a captured front is accepted before the optional side decision", () => {
+test("only a camera-captured front is accepted before the optional side decision", () => {
   const src = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
   const captured = src.indexOf('title: "Happy with this front photo?"');
   const armed = src.lastIndexOf('armLeaveGuard("scan")', captured);
+  const cameraOnly = src.indexOf('if (method === "camera") {', armed);
   const accepted = src.indexOf("if (!accepted)", captured);
   const optional = src.indexOf('title: "Add a side photo?"', accepted);
   const side = src.indexOf("if (takeSide) {", optional);
   const frontOnly = src.indexOf("await gateAnalysis(null, token)", side);
-  assert.ok(armed > 0 && captured > armed && accepted > captured && optional > accepted);
+  assert.ok(armed > 0 && cameraOnly > armed && captured > cameraOnly && accepted > captured && optional > accepted);
   assert.ok(side > optional && frontOnly > side);
   assert.match(src.slice(captured, optional), /preview: frontShot/);
+  assert.match(src.slice(accepted, optional), /retakeFront\(method\);\s*return;\s*\}\s*\}\s*track\("scan-front-done"\)/,
+    "upload and paste must go straight to the optional side decision, outside the camera-only block");
+  const uploaded = src.slice(src.indexOf("async function handleFile("), src.indexOf("async function captureBurst("));
+  assert.match(uploaded, /captureMethod = "upload"/);
+  assert.match(uploaded, /await handleCanvas\(src, exifOrientation, generation, token\)/);
+  assert.ok(src.indexOf("if (rejection) {", src.indexOf("async function handleCanvas(")) < cameraOnly,
+    "removing the redundant upload prompt must not remove photo validation");
 });
 
 test("backing out of the profile step never strands a completed front scan", () => {

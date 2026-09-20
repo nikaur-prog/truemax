@@ -24,6 +24,11 @@
     { "source": "/brand.html", "destination": "/brand", "permanent": true },
     { "source": "/league.html", "destination": "/league", "permanent": true },
     { "source": "/guides.html", "destination": "/guides", "permanent": true },
+    { "source": "/measurements.html", "destination": "/measurements", "permanent": true },
+    { "source": "/measurement-gonial-angle.html", "destination": "/measurements/gonial-angle", "permanent": true },
+    { "source": "/measurement-canthal-tilt.html", "destination": "/measurements/canthal-tilt", "permanent": true },
+    { "source": "/measurement-side-profile-analysis.html", "destination": "/measurements/side-profile-analysis", "permanent": true },
+    { "source": "/analytics.html", "destination": "/analytics", "permanent": true },
     { "source": "/face-score.html", "destination": "/face-score", "permanent": true },
     { "source": "/improve-your-looks.html", "destination": "/improve-your-looks", "permanent": true },
     { "source": "/looksmaxxing-guide.html", "destination": "/looksmaxxing-guide", "permanent": true },
@@ -43,6 +48,11 @@
     { "source": "/league/", "destination": "/league", "permanent": true },
     { "source": "/league/tools/", "destination": "/league/tools", "permanent": true },
     { "source": "/guides/", "destination": "/guides", "permanent": true },
+    { "source": "/measurements/", "destination": "/measurements", "permanent": true },
+    { "source": "/measurements/gonial-angle/", "destination": "/measurements/gonial-angle", "permanent": true },
+    { "source": "/measurements/canthal-tilt/", "destination": "/measurements/canthal-tilt", "permanent": true },
+    { "source": "/measurements/side-profile-analysis/", "destination": "/measurements/side-profile-analysis", "permanent": true },
+    { "source": "/analytics/", "destination": "/analytics", "permanent": true },
     { "source": "/face-score/", "destination": "/face-score", "permanent": true },
     { "source": "/improve-your-looks/", "destination": "/improve-your-looks", "permanent": true },
     { "source": "/looksmaxxing-guide/", "destination": "/looksmaxxing-guide", "permanent": true },
@@ -64,6 +74,11 @@
     { "source": "/league", "destination": "/league.html" },
     { "source": "/league/tools", "destination": "/quick.html" },
     { "source": "/guides", "destination": "/guides.html" },
+    { "source": "/measurements", "destination": "/measurements.html" },
+    { "source": "/measurements/gonial-angle", "destination": "/measurement-gonial-angle.html" },
+    { "source": "/measurements/canthal-tilt", "destination": "/measurement-canthal-tilt.html" },
+    { "source": "/measurements/side-profile-analysis", "destination": "/measurement-side-profile-analysis.html" },
+    { "source": "/analytics", "destination": "/analytics.html" },
     { "source": "/face-score", "destination": "/face-score.html" },
     { "source": "/improve-your-looks", "destination": "/improve-your-looks.html" },
     { "source": "/looksmaxxing-guide", "destination": "/looksmaxxing-guide.html" },
@@ -85,7 +100,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tiktokcdn.com https://thumb.wikimedia.org; media-src 'self' blob: mediastream:; font-src 'self'; connect-src 'self' https://ruvgkrlfmixfnmnzqgap.supabase.co wss://ruvgkrlfmixfnmnzqgap.supabase.co https://auth.truemax.app wss://auth.truemax.app; frame-src https://www.tiktok.com; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests"
+          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tiktokcdn.com https://thumb.wikimedia.org; media-src 'self' blob: mediastream:; font-src 'self'; connect-src 'self' https://ruvgkrlfmixfnmnzqgap.supabase.co wss://ruvgkrlfmixfnmnzqgap.supabase.co https://auth.truemax.app wss://auth.truemax.app; frame-src 'self' https://www.tiktok.com; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests"
         },
         { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
@@ -104,12 +119,25 @@
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
     {
+      "source": "/analytics(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
       "source": "/calib(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
     {
       "source": "/league(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/analytics",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "default-src 'none'; script-src 'self' https://www.googletagmanager.com; connect-src https://www.google-analytics.com https://region1.google-analytics.com https://analytics.google.com https://www.googletagmanager.com; img-src https://www.google-analytics.com https://region1.google-analytics.com; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; object-src 'none'" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
     },
     {
       "source": "/assets/(.*)",

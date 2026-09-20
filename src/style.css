@@ -17,6 +17,7 @@
 @import "@fontsource-variable/fraunces/opsz.css";
 @import "@fontsource-variable/inter/wght.css";
 @import "./ui/celebrityPortrait.css";
+@import "./ui/metricFit.css";
 
 :root {
   --bg: #f4f3ef;
@@ -2012,6 +2013,11 @@ body:not(.cam-takeover) #side-actions > .btn svg { flex: 0 0 auto; }
   background: var(--acc); border-color: var(--acc); color: #fff;
 }
 #side-actions .side-review-tools svg { flex: 0 0 auto; }
+.side-direction-choice {
+  flex: 0 0 100%; width: 100%; min-width: 0; margin: 4px 0 0; padding: 0; border: 0;
+}
+.side-direction-choice legend { padding: 0; color: var(--ink); font: 600 13px/1.5 var(--sans); }
+.side-direction-choice p { margin: 5px 0 10px; color: var(--mut); font: 400 12px/1.55 var(--sans); }
 .side-exit-actions {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
   width: 100%; flex: 0 0 100%; margin-top: 4px; padding-top: 16px;
@@ -6427,7 +6433,7 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   }
   /* Budget the frame separately from the compact chrome, rail and pane gap.
      A fixed viewport-based size avoids shrinking the face during a scroll. */
-  #v-main { --report-frame-h: clamp(110px, calc(40svh - 140px), 280px); }
+  #v-main { --report-frame-h: clamp(190px, 38svh, 340px); }
   #v-main:has(.pane-photo.results-ready) { gap: 10px; margin-top: 8px; }
   /* Reading order on a phone: photograph, score, then the small print about
      how it was measured. The notes used to sit ABOVE the picture, which meant
@@ -6466,7 +6472,9 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
   .pane-photo:not(.results-ready) .face-frame { max-height: 66vh; }
   .pane-photo.results-ready .face-frame .zoomable canvas {
     height: var(--report-frame-h, min(28svh, 330px)); object-fit: contain;
-    object-position: var(--face-x, center) var(--face-y, 40%);
+    /* Photo and overlay share this coordinate system. The result wrapper
+       fits the face automatically without changing source pixels or points. */
+    object-position: 50% 50%;
   }
   /* A finished result already names its active view in the score cards and
      category rail. FRONT / ANALYZED plus an empty progress track was the blank
@@ -6509,6 +6517,13 @@ body.funnel-open { position: fixed; inset: 0; width: 100%; overflow: hidden; ove
 @media (prefers-reduced-motion: reduce) {
   .pane-photo .face-frame { transition: none; }
   .rtabs-rail, .rtab { transition: none; }
+}
+
+/* On a phone turned sideways, retain the useful photo size but let it scroll
+   away. Pin only the category rail so report text still has room to breathe. */
+@media (max-width: 850px) and (max-height: 500px) {
+  .pane-photo.results-ready.report-photo-pinned { position: static; }
+  .rtabs-rail { top: var(--report-header-h, 38px); }
 }
 
 /* ---------------------------------------------------------------------------

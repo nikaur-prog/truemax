@@ -185,8 +185,8 @@ const READS: Record<string, Read> = {
   // which point the guarantee test will fail on their absence here, which is
   // that mechanism doing its job.
   gonialAngle: {
-    high: "the jaw's corner opens gradually into the neck: the soft, obtuse hinge",
-    low: "the jaw turns a tight corner behind the ear: the square hinge that defines a profile",
+    high: "the lines meeting at the visible jaw corner form a more open angle in this photo; this does not measure jaw definition or facial fat",
+    low: "the lines meeting at the visible jaw corner form a tighter angle in this photo; this does not establish a leaner or more defined jaw",
   },
   chinRecession: {
     high: "the lips stand ahead of the chin's line: the chin reads set back beneath them",
@@ -209,8 +209,8 @@ const READS: Record<string, Read> = {
     low: "the angle under the nose is closed: the tip sits low toward the lip",
   },
   nasalProjection: {
-    high: "the nose stands well off the face for its length",
-    low: "the nose sits close to the face, little projection at the tip",
+    high: "the nose tip sits further in front of the bridge-to-nose-base line relative to the measured bridge-to-chin height",
+    low: "the nose tip sits closer to the bridge-to-nose-base line relative to the measured bridge-to-chin height",
   },
   upperLipELine: {
     high: "the upper lip reaches toward the nose-to-chin line: the fuller, forward mouth in profile",
@@ -221,8 +221,8 @@ const READS: Record<string, Read> = {
     low: "the lower lip sits well behind the line: the recessive lower mouth",
   },
   lowerThirdDepth: {
-    high: "the lower face is deep front-to-back: jaw and chin carry real forward volume",
-    low: "the lower face is shallow front-to-back, sitting close to the neck",
+    high: "the nose-base-to-chin span takes up a larger share of the bridge-to-chin span in this profile; this is a distance ratio, not forward depth",
+    low: "the nose-base-to-chin span takes up a smaller share of the bridge-to-chin span in this profile; this does not measure how far the jaw projects",
   },
 };
 

@@ -103,11 +103,13 @@ test("uncertain side capture warnings and initial points survive review, save an
     localConfidence: 0,
     templateFallback: true,
     warnings: ["detector-unavailable"],
+    cloudAttempt: { status: "unavailable", reason: "provider-credit" },
     reviewedRangeWarnings: ["gonialAngle"],
   };
   const snapshot = snapshotCalibrationDiagnostics({ ...capture, side: capture.side });
   capture.side!.diagnostics!.localAutomaticPoints!.gonion.x = 999;
   capture.side!.diagnostics!.warnings.length = 0;
+  capture.side!.diagnostics!.cloudAttempt!.reason = "network-error";
   const exported = JSON.parse(calibrationDiagnosticsJSON([
     { id: "w1", sex: "female", rating: null, ratedBy: "self", scored: 5.6, measurements: {}, diagnostics: snapshot },
   ]));
@@ -116,6 +118,7 @@ test("uncertain side capture warnings and initial points survive review, save an
   assert.equal(side.diagnostics.templateFallback, true, "human review does not turn a template into automatic detection");
   assert.notEqual(side.diagnostics.localAutomaticPoints.gonion.x, 999);
   assert.deepEqual(side.diagnostics.warnings, ["detector-unavailable"]);
+  assert.deepEqual(side.diagnostics.cloudAttempt, { status: "unavailable", reason: "provider-credit" });
   assert.deepEqual(side.diagnostics.reviewedRangeWarnings, ["gonialAngle"]);
 });
 

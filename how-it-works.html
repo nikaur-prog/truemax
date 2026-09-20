@@ -25,7 +25,7 @@
             "name": "How TrueMax Face Analysis Works: Scan to Results",
             "description": "Follow a TrueMax scan from a front photo and optional side view to reviewed points, facial measurements and a realistic plan with clear privacy choices.",
             "url": "https://www.truemax.app/how-it-works",
-            "dateModified": "2026-09-07",
+            "dateModified": "2026-09-20",
             "isPartOf": {
               "@id": "https://www.truemax.app/#website"
             },
@@ -59,20 +59,32 @@
     <main class="legal-shell guide-shell">
       <nav class="guide-breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a> / How it works</nav>
       <p class="legal-kicker">TrueMax · How it works</p>
-      <h1>A photo, the working, then your next step</h1>
-      <p class="legal-meta">Updated 7 September 2026 · Published by <a href="/about">TrueMax</a></p>
-      <p class="guide-deck">The first scan should answer two questions: what can this photo measure, and what can you realistically do with that information?</p>
+      <h1>How TrueMax face analysis works</h1>
+      <p class="legal-meta">Updated 20 September 2026 · Published by <a href="/about#editorial">TrueMax</a></p>
+      <p class="guide-deck">TrueMax is a browser-based face rating app. Start with a front photo, choose whether to add a side profile and read the result with its measurement limits. You do not need a native app download to use the web scanner.</p>
 
       <ol class="guide-steps">
-        <li><b>Take or attach a front photo.</b> Use even light, a level camera and a relaxed expression. Measurement runs in your browser, not on an uploaded front photo. <a href="/help/take-a-good-face-scan">See the photo guide</a>.</li>
+        <li><b>Take or attach a front photo.</b> Use even light, a level camera and a relaxed expression. The core front measurement runs in your browser whether you use the camera or choose a file. <a href="/help/take-a-good-face-scan">See the photo guide</a>.</li>
         <li><b>Add a side photo, or skip it.</b> Turn 90 degrees with your head level. A side photo adds projection and profile angles. Front-only analysis does not fill missing side measurements with guesses.</li>
         <li><b>Review the side points if you added that view.</b> With cloud-placement consent, an automatic pass helps place thirteen points. You can use them, place them yourself, retake the photo or skip the side. When automatic placement is unavailable, an on-device starting layout is available.</li>
         <li><b>Create an account to open the result.</b> Use email and password, or continue with Google. Your first result does not require a subscription. The scan is kept on the same browser while you sign in so you can return to the analysis. Personal details belong in the later pathway quiz, with optional height and weight for adults.</li>
-        <li><b>Read the measurements, not only the total.</b> A score out of ten and a reference percentile are different quantities. Paid depth adds the detailed regions and measurements. Missing or unreliable readings should not be treated as zero.</li>
+        <li><b>Read the measurements, not only the total.</b> A score out of ten and a reference percentile are different quantities. Detailed report access depends on your plan or scan access. Missing or unreliable readings should not be treated as zero.</li>
         <li><b>Choose a practical next step.</b> Adult Max members can build a plan with Coach Max. Presentation, grooming and habits are different from changing bone structure. No preview is a guaranteed future face.</li>
       </ol>
       <h2 id="views">What each view contributes</h2>
       <table class="legal-table"><thead><tr><th scope="col">Front photo</th><th scope="col">Optional side photo</th></tr></thead><tbody><tr><td>Eye spacing and tilt, visible widths, proportions and left-right comparisons.</td><td>Profile angles and relative nose, lip and chin projection. These cannot be established from a front-only image.</td></tr></tbody></table>
+      <p>The two views answer different questions. For example, <a href="/measurements/canthal-tilt">canthal tilt</a> uses eye-corner positions in a front photo. The side-profile <a href="/measurements/gonial-angle">gonial angle</a> uses a different construction around the jaw. A good front scan cannot supply missing side landmarks.</p>
+      <h2 id="measurements">Why not every scan has the same number of readings</h2>
+      <p>TrueMax's catalogue contains 43 available measurement definitions across front and side views. That is not a promise of 43 usable or equally reliable scores from one photo. The views supplied, visible landmarks, measurement bounds and reliability rules affect what a report can use.</p>
+      <p>Start with the <a href="/measurements">measurement glossary</a> for definitions, or <a href="/measurements/side-profile-analysis">what side-profile analysis can tell you</a> for a closer look at the optional view. More readings are useful only when their meaning and limitations are clear.</p>
+      <h2 id="read-result">How to read one result</h2>
+      <ol class="guide-steps">
+        <li><b>Check the view and photo.</b> Make sure the reading describes the front or side you intended.</li>
+        <li><b>Check the selected points.</b> A misplaced jaw point changes the angle even if the arithmetic is correct.</li>
+        <li><b>Read the value and unit.</b> Degrees, proportions and scores are different quantities.</li>
+        <li><b>Read the model's reference in context.</b> It is an interpretation rule, not an instruction to alter a feature.</li>
+      </ol>
+      <p>The <a href="/face-score">face-score guide</a> includes a worked example and explains why two apps can give different scores for similar measurements.</p>
       <h2 id="privacy">Three separate upload choices</h2>
       <p>The front measurement engine runs on-device. Scan history and its photos stay in this browser. Optional cloud side-point placement, optional side-point feedback and optional Goal previews are separate features with separate consent.</p>
       <ol>
@@ -86,5 +98,6 @@
       <section class="guide-cta"><h2>Try the first step</h2><p>A front photo is enough to start. Learn about <a href="/pricing">plans and allowances</a> without starting a checkout.</p><a class="btn pri" href="/">Take or attach a photo</a></section>
       <nav class="legal-nav" aria-label="Explore TrueMax"><a href="/how-it-works">How it works</a> · <a href="/pricing">Pricing</a> · <a href="/help/take-a-good-face-scan">Photo help</a> · <a href="/guides">Guides</a> · <a href="/methodology">Methodology</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></nav>
     </main>
+    <script type="module" src="/src/public-entry.ts"></script>
   </body>
 </html>

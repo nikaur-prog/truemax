@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { analyzeSide } from "./scoring.js";
 import { computeSideMetrics, sidePointIntegrityIssues, type SidePoints } from "./sideMetrics.js";
-import { metricScoreLabel } from "../ui/metricDetail.js";
+import { metricFit, metricModelScoreLabel } from "../ui/metricFit.js";
 import { regionSummary } from "../ui/templates.js";
 
 const PROFILE: SidePoints = {
@@ -56,15 +56,18 @@ test("missing and non-finite jaw points remain unavailable instead of receiving 
   }
 });
 
-test("the existing scale calls 117 and 127 degrees mid-range and does not mistake 117 for a jaw weakness", () => {
+test("reference fit stays separate from the unchanged model score and 117 is not mistaken for a jaw weakness", () => {
   // These are regression observations of the current mapping, not validation
   // of its population reference or a target fitted to another product.
   for (const sex of ["male", "female"] as const) for (const angle of [117, 127]) {
     const report = analyzeSide(withAngle(angle), 1, sex);
     const metric = report.metrics.find((item) => item.def.id === "gonialAngle")!;
-    assert.equal(metricScoreLabel(metric.score, metric.def.name), "Mid-range model score for gonial angle");
+    assert.ok(metric.score >= 4.5 && metric.score < 6);
+    assert.equal(metricModelScoreLabel(metric), `Model score ${metric.score.toFixed(1)} / 10`);
     if (angle === 117) {
       assert.ok(metric.conformance >= 0.999);
+      // 117 sits just below the female band's current 117.1 lower edge.
+      assert.equal(metricFit(metric, sex).state, sex === "male" ? "within" : "outside");
       assert.ok(metric.zEff > 0);
       const summary = regionSummary(report.regions.find((region) => region.region === "jaw")!, sex);
       assert.doesNotMatch(summary, /The one to go at is your gonial angle/);

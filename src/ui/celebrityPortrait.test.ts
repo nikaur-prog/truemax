@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { celebrityPortraitImage, celebrityPortraitCredits, PORTRAIT_DISCLOSURE } from "./celebrityPortrait.js";
+import { celebrityPortraitFigure, celebrityPortraitImage, celebrityPortraitCredits, PORTRAIT_DISCLOSURE } from "./celebrityPortrait.js";
 import { celebrityPortrait } from "../engine/celebrityPortraits.js";
 import { CELEBS } from "../engine/celebs.js";
 
@@ -29,10 +29,22 @@ test("each used portrait exposes its source, author, license and crop disclosure
   assert.equal(celebrityPortraitCredits(["unknown"]), "");
 });
 
+test("opened comparison portraits load immediately and have an explicit missing-photo fallback", () => {
+  const html = celebrityPortraitFigure(name);
+  assert.match(html, /loading="eager"/);
+  assert.match(html, /alt="Reference portrait of /);
+  assert.match(html, /Photo unavailable/);
+  assert.match(html, /portrait-unavailable" hidden/);
+  assert.doesNotMatch(html, /aria-hidden/);
+  const unavailable = celebrityPortraitFigure("unknown");
+  assert.match(unavailable, /is-unavailable/);
+  assert.doesNotMatch(unavailable, /<img| hidden/);
+});
+
 test("dashboard, results and metric details wire credits and resource-error fallback", () => {
   for (const file of ["dashboard.ts", "results.ts", "metricDetail.ts"]) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
-    assert.match(source, /celebrityPortraitImage\(/, file);
+    assert.match(source, /celebrityPortrait(?:Image|Figure)\(/, file);
     assert.match(source, /celebrityPortraitCredits\(/, file);
     assert.match(source, /installCelebrityPortraitFallback\(\)/, file);
   }

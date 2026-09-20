@@ -3,6 +3,8 @@ import type { SidePointId, SidePoints } from "../engine/sideMetrics.js";
 import { sidePlacementDeadline, sidePlacementTimeoutMs } from "../engine/sidePlacementRequest.js";
 import { hasSideObservations, parseSidePlacementEvidence } from "../engine/sidePlacementEvidence.js";
 import type { SidePlacementEvidence } from "../engine/sidePlacementEvidence.js";
+import { sideCloudHttpFailure } from "../engine/sideCloudFailure.js";
+import type { SideCloudFailureReason } from "../engine/sideCloudFailure.js";
 
 const CHOICE_KEY = "truemax:side-cloud-placement:v1";
 const MAX_UPLOAD_BYTES = 2_000_000;
@@ -24,6 +26,8 @@ export interface CloudSidePlacementOptions {
   faceDir?: 1 | -1;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** A bounded, non-sensitive code for local capture diagnostics. */
+  onFailure?: (reason: SideCloudFailureReason) => void;
 }
 
 /** Invalid or geometrically collapsed seeds must not steer the crop pass. */
@@ -124,25 +128,31 @@ export async function requestCloudSidePlacement(
   const config = typeof options === "number" ? { timeoutMs: options } : options;
   const width = canvas.width;
   const height = canvas.height;
-  if (!accessToken || !validDimension(width) || !validDimension(height) || config.signal?.aborted) return null;
+  const fail = (reason: SideCloudFailureReason): null => { config.onFailure?.(reason); return null; };
+  if (config.signal?.aborted) return null;
+  if (!accessToken) return fail("auth-required");
+  if (!validDimension(width) || !validDimension(height)) return fail("invalid-image");
   // Snapshot coordinates before the first await. toBlob snapshots these pixels
   // when invoked; later retakes cannot rescale the response into a new frame.
   const seed = config.seed ? cloudSideSeedFractions(config.seed, width, height, config.faceDir) : null;
-  if (config.seed && !seed) return null;
+  if (config.seed && !seed) return fail("invalid-seed");
   const timeoutMs = sidePlacementTimeoutMs(config.timeoutMs);
   const startedAt = Date.now();
   const deadline = sidePlacementDeadline(timeoutMs, config.signal);
   let resolveCancelled!: (value: null) => void;
   const cancelled = new Promise<null>((resolve) => { resolveCancelled = resolve; });
-  const cancel = () => resolveCancelled(null);
+  const cancel = () => resolveCancelled(config.signal?.aborted ? null : fail("timeout"));
   deadline.signal.addEventListener("abort", cancel, { once: true });
   try {
     return await Promise.race([cancelled, (async () => {
       try {
-        const photo = await jpegForPlacement(canvas);
-        if (deadline.signal.aborted || !photo || photo.size > MAX_UPLOAD_BYTES) return null;
+        let photo: Blob | null;
+        try { photo = await jpegForPlacement(canvas); } catch { return fail("encoding-failed"); }
+        if (deadline.signal.aborted) return null;
+        if (!photo) return fail("encoding-failed");
+        if (photo.size > MAX_UPLOAD_BYTES) return fail("image-too-large");
         const remaining = timeoutMs - (Date.now() - startedAt);
-        if (remaining <= 0) return null;
+        if (remaining <= 0) return fail("timeout");
         const body = new FormData();
         body.append("photo", photo, "side-profile.jpg");
         body.append("width", String(width));
@@ -155,12 +165,21 @@ export async function requestCloudSidePlacement(
           body,
           signal: deadline.signal,
         });
-        if (deadline.signal.aborted || !response.ok) return null;
-        const value = await response.json();
         if (deadline.signal.aborted) return null;
-        return parseCloudSidePlacement(value, width, height);
+        if (!response.ok) {
+          // Keep the HTTP fallback if an error body is absent, malformed or slow.
+          let reason = sideCloudHttpFailure(response.status);
+          config.onFailure?.(reason);
+          try { reason = sideCloudHttpFailure(response.status, await response.json()); } catch { /* status is enough */ }
+          return deadline.signal.aborted ? null : fail(reason);
+        }
+        let value: unknown;
+        try { value = await response.json(); } catch { return fail("response-invalid"); }
+        if (deadline.signal.aborted) return null;
+        const placement = parseCloudSidePlacement(value, width, height);
+        return placement ?? fail("response-invalid");
       } catch {
-        return null;
+        return deadline.signal.aborted ? null : fail("network-error");
       }
     })()]);
   } finally {

@@ -11,7 +11,8 @@ const quick = await readFile(new URL('../src/quick.ts', import.meta.url), 'utf8'
 const extractedForm = quick.slice(quick.indexOf('function renderRatingStep('), quick.indexOf('function renderVerdictStep(')).match(/el\.calBody\.innerHTML = `([\s\S]*?)`;/)?.[1];
 // This fixture owns a female report. Substitute only its known group label;
 // new template expressions must still be reviewed instead of evaluated here.
-const form = extractedForm?.replace('${r.sex === "female" ? "women" : "men"}', 'women');
+const form = extractedForm?.replace('${r.sex === "female" ? "women" : "men"}', 'women')
+  .replace('${calibrationRatingOptions(Boolean(pendingFront), Boolean(pendingSide))}', '<option value="front">Front only</option><option value="side">Side only</option><option value="combined" selected>Front + side</option><option value="external-overall">Another app\'s total</option>');
 if (!form || form.includes('${')) throw new Error('Review fixture extraction before running this test.');
 const artifacts = await mkdtemp(path.join(os.tmpdir(), 'truemax-calibration-reference-'));
 const browser = await launchChromium({ headless: true });

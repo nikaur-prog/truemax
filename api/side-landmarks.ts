@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { anthropicKey } from "./_anthropicKey.js";
+import { providerPlacementFailureReason } from "./_sidePlacementFailureReason.js";
+import type { SideCloudFailureReason } from "../src/engine/sideCloudFailure.js";
 import {
   LANDMARK_PASSES_PER_DAY,
   MAX_LANDMARK_IMAGE_BYTES,
@@ -89,19 +91,19 @@ async function handleSidePlacement(request: Request, deps: typeof defaultDepende
     if (error) throw new Error(error.message);
   };
   try {
-    if (!requestOrigin(request)) return json({ error: "Cross-origin placement is not allowed." }, 403);
+    if (!requestOrigin(request)) return json({ error: "Cross-origin placement is not allowed.", code: "origin-rejected" }, 403);
 
     const user = await deps.authenticatedUser(request);
-    if (!user) return json({ error: "Sign in to place the points with the cloud pass." }, 401);
+    if (!user) return json({ error: "Sign in to place the points with the cloud pass.", code: "auth-required" }, 401);
 
     const declared = Number(request.headers.get("content-length") ?? "0");
-    if (declared > MAX_BODY_BYTES) return json({ error: "That photo is too large." }, 413);
+    if (declared > MAX_BODY_BYTES) return json({ error: "That photo is too large.", code: "image-too-large" }, 413);
 
     const form = await request.formData();
     const photo = form.get("photo");
-    if (!(photo instanceof File)) return json({ error: "Attach the side photo as `photo`." }, 400);
+    if (!(photo instanceof File)) return json({ error: "Attach the side photo as `photo`.", code: "invalid-image" }, 400);
     if (!MEDIA_TYPES.has(photo.type as LandmarkMediaType) || photo.size < 100 || photo.size > MAX_LANDMARK_IMAGE_BYTES) {
-      return json({ error: "The side photo must be a JPEG, PNG or WebP under 2 MB." }, 400);
+      return json({ error: "The side photo must be a JPEG, PNG or WebP under 2 MB.", code: "invalid-image" }, 400);
     }
     const width = frameSize(form.get("width"));
     const height = frameSize(form.get("height"));
@@ -109,7 +111,7 @@ async function handleSidePlacement(request: Request, deps: typeof defaultDepende
     const remainingMs = sidePlacementTimeoutMs(form.get("timeoutMs"))
       - (Date.now() - startedAt) - SIDE_PLACEMENT_RESPONSE_RESERVE_MS;
     if (remainingMs <= 0 || request.signal.aborted) {
-      return json({ error: "The placement request timed out. Use the device points or try again." }, 408);
+      return json({ error: "The placement request timed out. Use the device points or try again.", code: "timeout" }, 408);
     }
     deadline = sidePlacementDeadline(remainingMs, request.signal);
 
@@ -120,12 +122,16 @@ async function handleSidePlacement(request: Request, deps: typeof defaultDepende
       p_user_id: user.id,
       p_limit: LANDMARK_PASSES_PER_DAY,
     });
-    if (claimError) throw new Error(`Placement allowance is unavailable: ${claimError.message}`);
+    if (claimError) {
+      console.error("side-landmarks allowance", "allowance-unavailable");
+      return json({ error: "Cloud placement is temporarily unavailable. Use the device points instead.", code: "allowance-unavailable" }, 503);
+    }
     if (typeof remaining === "number" && remaining < 0) {
       return json(
         {
           error: `That is ${LANDMARK_PASSES_PER_DAY} cloud placements today, which is the daily limit. You can still place the points yourself.`,
           resetsAt: nextUtcMidnight(),
+          code: "rate-limited",
         },
         429,
       );
@@ -133,6 +139,7 @@ async function handleSidePlacement(request: Request, deps: typeof defaultDepende
     claimedUserId = user.id;
 
     let pass;
+    let cropFailure: SideCloudFailureReason | undefined;
     try {
       deadline.signal.throwIfAborted();
       const prepared = await deps.prepareLandmarkImage(Buffer.from(await photo.arrayBuffer()));
@@ -140,7 +147,11 @@ async function handleSidePlacement(request: Request, deps: typeof defaultDepende
       pass = await deps.placeSideLandmarks(deps.client(), prepared, {
         hint,
         signal: deadline.signal,
-        onZoomError: (cluster, error) => console.error(`side-landmarks zoom ${cluster}`, safeMessage(error)),
+        onZoomError: (cluster, error) => {
+          const reason = providerPlacementFailureReason(error);
+          if (!cropFailure || reason !== "provider-unavailable") cropFailure = reason;
+          console.error(`side-landmarks zoom ${cluster}`, reason);
+        },
       });
     } catch (error) {
       // A pass that produced nothing costs nothing: give the claim back, and
@@ -148,11 +159,13 @@ async function handleSidePlacement(request: Request, deps: typeof defaultDepende
       await releaseClaim().catch((releaseError) => {
         console.error("side-landmarks release", safeMessage(releaseError));
       });
-      console.error("side-landmarks model", safeMessage(error));
+      const classified = providerPlacementFailureReason(error);
+      const code = classified === "provider-unavailable" ? cropFailure ?? classified : classified;
+      console.error("side-landmarks model", code);
       if (deadline.signal.aborted) {
-        return json({ error: "The placement request timed out. Use the device points or try again." }, 408);
+        return json({ error: "The placement request timed out. Use the device points or try again.", code: "timeout" }, 408);
       }
-      return json({ error: "The points could not be placed just then. Placing them on the device instead." }, 502);
+      return json({ error: "The points could not be placed just then. Placing them on the device instead.", code }, 502);
     }
     claimedUserId = null;
 
@@ -172,7 +185,7 @@ async function handleSidePlacement(request: Request, deps: typeof defaultDepende
     await releaseClaim().catch((releaseError) => {
       console.error("side-landmarks release", safeMessage(releaseError));
     });
-    return json({ error: "The points could not be placed just then." }, 500);
+    return json({ error: "The points could not be placed just then.", code: "server-unavailable" }, 500);
   } finally {
     deadline?.dispose();
   }
