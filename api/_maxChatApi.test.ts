@@ -14,11 +14,12 @@ const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarg
 const chatId = "11111111-1111-4111-8111-111111111111";
 const foreignId = "22222222-2222-4222-8222-222222222222";
 
-function harness(options: { answer?: string; interrupted?: boolean; providerError?: Error; saveThrows?: boolean; user?: string | null; entitled?: boolean; origin?: boolean } = {}) {
+function harness(options: { answer?: string; interrupted?: boolean; providerError?: Error; saveThrows?: boolean; saveError?: boolean; metadataFailure?: "throw" | "error"; user?: string | null; entitled?: boolean; origin?: boolean } = {}) {
   const queries: Array<{ table: string; filters: unknown[][]; write?: Record<string, unknown> }> = [];
   const messages: Array<Record<string, unknown>> = [];
   const rpc: string[] = [];
   const prompts: unknown[] = [];
+  const errors: unknown[][] = [];
   const admin = {
     async rpc(name: string) { rpc.push(name); return { data: 29, error: null }; },
     from(table: string) {
@@ -35,7 +36,12 @@ function harness(options: { answer?: string; interrupted?: boolean; providerErro
         queries.push({ table, filters, write });
         if (table === "max_messages" && insert && write) {
           if (write.role === "assistant" && options.saveThrows) return Promise.reject(new Error("save failed")).then(resolve, reject);
+          if (write.role === "assistant" && options.saveError) return Promise.resolve({ data: null, error: { message: "save failed" } }).then(resolve, reject);
           messages.push(write);
+        }
+        if (table === "max_conversations" && write && !insert && messages.some((row) => row.role === "assistant")) {
+          if (options.metadataFailure === "throw") return Promise.reject(new Error("metadata failed")).then(resolve, reject);
+          if (options.metadataFailure === "error") return Promise.resolve({ data: null, error: { message: "metadata failed" } }).then(resolve, reject);
         }
         const foreign = filters.some(([op, key, value]) => op === "eq" && key === "id" && value === foreignId);
         const data = table === "body_profiles" ? null
@@ -69,13 +75,13 @@ function harness(options: { answer?: string; interrupted?: boolean; providerErro
     safeMessage: () => "test error",
     maxAccessForUser: async () => options.entitled === false ? { ok: false, status: 402, error: "Max required" } : { ok: true, age: 25, staff: true },
     conversationTitle, parsePlanMemoryCommand, hydrateRoutineContext: async () => {}, createMaxReplyStream,
-    process: { env: {} }, console: { error() {} },
+    process: { env: {} }, console: { error(...args: unknown[]) { errors.push(args); } },
   };
   const post = new Function(...Object.keys(inputs), `${js}\nreturn POST;`)(...Object.values(inputs)) as (request: Request) => Promise<Response>;
   const request = (extra: Record<string, unknown> = {}) => new Request("https://truemax.app/api/max-chat", {
     method: "POST", body: JSON.stringify({ context: {}, messages: [{ role: "user", content: "One useful next step?" }], ...extra }),
   });
-  return { post, request, queries, messages, rpc, prompts };
+  return { post, request, queries, messages, rpc, prompts, errors };
 }
 
 test("chat guards refuse requests before database reads, claims or provider calls", async () => {
@@ -133,9 +139,34 @@ test("a partial failed answer and its notice are saved only to the authenticated
   assert.deepEqual(h.rpc, ["claim_max_chat_turn"]);
 });
 
-test("a thrown history-write failure settles the HTTP body instead of hanging until timeout", async () => {
-  const h = harness({ saveThrows: true });
-  const response = await h.post(h.request());
-  assert.ok((await response.text()).endsWith(MAX_REPLY_NOT_SAVED));
-  assert.deepEqual(h.rpc, ["claim_max_chat_turn"]);
+test("an assistant insert failure reports an unsaved reply without storing its error notice", async () => {
+  for (const options of [{ saveThrows: true }, { saveError: true }]) {
+    const h = harness(options);
+    const response = await h.post(h.request());
+    assert.equal(await response.text(), `Keep it simple.\n\n${MAX_REPLY_NOT_SAVED}`);
+    assert.deepEqual(h.messages.map((row) => row.role), ["user"]);
+    assert.deepEqual(h.errors.map(([stage]) => stage), ["max-chat persistence"]);
+    assert.deepEqual(h.rpc, ["claim_max_chat_turn"]);
+    assert.equal(h.queries.filter((query) => query.table === "max_conversations" && query.write && !query.write.user_id).length, 1,
+      "no assistant recency update is attempted after its insert fails");
+  }
+});
+
+test("a saved assistant reply remains successful when its conversation recency update fails", async () => {
+  for (const metadataFailure of ["throw", "error"] as const) {
+    const h = harness({ metadataFailure });
+    const response = await h.post(h.request({ user_id: "somebody-else" }));
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "Keep it simple.");
+    assert.deepEqual(h.messages.map((row) => row.role), ["user", "assistant"]);
+    assert.equal(h.messages[1].content, "Keep it simple.");
+    assert.ok(h.messages.every((row) => row.user_id === "owner" && row.conversation_id === chatId));
+    const metadataUpdate = h.queries[h.queries.length - 1];
+    assert.equal(metadataUpdate?.table, "max_conversations");
+    assert.ok(metadataUpdate?.filters.some(([op, key, value]) => op === "eq" && key === "id" && value === chatId));
+    assert.ok(metadataUpdate?.filters.some(([op, key, value]) => op === "eq" && key === "user_id" && value === "owner"));
+    assert.deepEqual(h.errors.map(([stage]) => stage), ["max-chat conversation recency update"]);
+    assert.deepEqual(h.rpc, ["claim_max_chat_turn"]);
+    assert.equal(h.prompts.length, 1);
+  }
 });

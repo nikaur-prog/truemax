@@ -128,7 +128,16 @@ export async function requestCloudSidePlacement(
   const config = typeof options === "number" ? { timeoutMs: options } : options;
   const width = canvas.width;
   const height = canvas.height;
-  const fail = (reason: SideCloudFailureReason): null => { config.onFailure?.(reason); return null; };
+  let failureReported = false;
+  const fail = (reason: SideCloudFailureReason): null => {
+    // A deadline can win while encoding or JSON decoding is still pending.
+    // Late work must not overwrite that result or report a cancelled retake.
+    if (!failureReported && !config.signal?.aborted) {
+      failureReported = true;
+      config.onFailure?.(reason);
+    }
+    return null;
+  };
   if (config.signal?.aborted) return null;
   if (!accessToken) return fail("auth-required");
   if (!validDimension(width) || !validDimension(height)) return fail("invalid-image");
@@ -167,9 +176,9 @@ export async function requestCloudSidePlacement(
         });
         if (deadline.signal.aborted) return null;
         if (!response.ok) {
-          // Keep the HTTP fallback if an error body is absent, malformed or slow.
+          // Parse the optional detail before emitting one final failure reason.
+          // Absent/malformed bodies use HTTP status; slow bodies share the deadline.
           let reason = sideCloudHttpFailure(response.status);
-          config.onFailure?.(reason);
           try { reason = sideCloudHttpFailure(response.status, await response.json()); } catch { /* status is enough */ }
           return deadline.signal.aborted ? null : fail(reason);
         }

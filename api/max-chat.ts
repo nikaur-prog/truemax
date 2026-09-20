@@ -324,12 +324,19 @@ export async function POST(request: Request): Promise<Response> {
             content: assistantText.trim().slice(0, 8000),
             created_at: savedAt,
           });
-          const updated = assistantInsert.error ? null : await admin
-            .from("max_conversations")
-            .update({ updated_at: savedAt, last_message_at: savedAt })
-            .eq("id", conversation.id)
-            .eq("user_id", user.id);
-          if (assistantInsert.error || updated?.error) throw new Error(assistantInsert.error?.message ?? updated?.error?.message);
+          if (assistantInsert.error) throw new Error(assistantInsert.error.message);
+          // The reply is durable once its insert succeeds. A failed recency
+          // update must not tell the member to retry an already-saved answer.
+          try {
+            const updated = await admin
+              .from("max_conversations")
+              .update({ updated_at: savedAt, last_message_at: savedAt })
+              .eq("id", conversation.id)
+              .eq("user_id", user.id);
+            if (updated.error) throw new Error(updated.error.message);
+          } catch (metadataError) {
+            console.error("max-chat conversation recency update", safeMessage(metadataError));
+          }
         }
       },
       cancel() {

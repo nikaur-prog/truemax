@@ -158,8 +158,53 @@ test("cloud failures retain bounded reasons without retaining response messages"
     const reasons: SideCloudFailureReason[] = [];
     const result = await requestCloudSidePlacement(canvas(), "test-token", { onFailure: (value) => reasons.push(value) });
     assert.equal(result, null);
-    assert.equal(reasons[reasons.length - 1], reason);
+    assert.deepEqual(reasons, [reason], "each request emits exactly one final reason");
     assert.equal(JSON.stringify(reasons).includes("private"), false);
+  }
+});
+
+test("an unreadable HTTP error body emits its status fallback once", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response("not JSON", { status: 502 }));
+  const reasons: SideCloudFailureReason[] = [];
+  assert.equal(await requestCloudSidePlacement(canvas(), "test-token", { onFailure: (reason) => reasons.push(reason) }), null);
+  assert.deepEqual(reasons, ["provider-unavailable"]);
+});
+
+test("a stalled HTTP error body reports timeout once and ignores late details", async (t) => {
+  let resolveBody!: (value: unknown) => void;
+  t.mock.method(globalThis, "fetch", async () => ({
+    ok: false, status: 502,
+    json: () => new Promise((resolve) => { resolveBody = resolve; }),
+  }) as Response);
+  const reasons: SideCloudFailureReason[] = [];
+  assert.equal(await requestCloudSidePlacement(canvas(), "test-token", {
+    timeoutMs: 10, onFailure: (reason) => reasons.push(reason),
+  }), null);
+  assert.deepEqual(reasons, ["timeout"]);
+  resolveBody({ code: "provider-credit" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reasons, ["timeout"]);
+});
+
+test("a late JSON rejection cannot overwrite timeout or a retake cancellation", async (t) => {
+  for (const cancelled of [false, true]) {
+    let rejectBody!: (reason: Error) => void;
+    t.mock.method(globalThis, "fetch", async () => ({
+      ok: true,
+      json: () => new Promise((_resolve, reject) => { rejectBody = reject; }),
+    }) as Response);
+    const reasons: SideCloudFailureReason[] = [];
+    const parent = new AbortController();
+    const pending = requestCloudSidePlacement(canvas(), "test-token", {
+      timeoutMs: cancelled ? 5_000 : 10, signal: parent.signal,
+      onFailure: (reason) => reasons.push(reason),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (cancelled) parent.abort();
+    assert.equal(await pending, null);
+    rejectBody(new Error("late decode failure"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(reasons, cancelled ? [] : ["timeout"]);
   }
 });
 
