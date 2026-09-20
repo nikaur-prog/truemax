@@ -89,7 +89,12 @@ test("saved-library calibration choices preview the selected canvas", () => {
 
 test("calibration side files ask after selection and cancellation cannot reach placement", () => {
   const slots = quick.slice(quick.indexOf("function renderFaceSlots"), quick.indexOf("function renderRatingStep"));
-  assert.match(slots, /beforeUpload: \(file, signal\) => chooseCalibrationReference\(file, signal\)/);
+  assert.match(slots, /let acceptedFileReference: CalibrationFileReference \| undefined;\s*openSideCapture\(/,
+    "file hints belong to this side capture, not a prior face");
+  assert.match(slots, /beforeUpload: async \(file, signal\) => \{\s*const sex = await chooseCalibrationReference\(file, signal\);\s*if \(sex && !signal\.aborted\) acceptedFileReference = calibrationFileReference\(file\.name\);\s*return sex;\s*\}/,
+    "reference choice must finish before accepting a hint, and cancellation cannot publish one");
+  assert.match(slots, /onDone: \(report, points, faceDir, review\) => \{\s*closeSideFlow\(\);\s*pendingSide = report;\s*pendingSideFileReference = acceptedFileReference;/,
+    "only a completed side review replaces the pending filename hint");
   assert.match(slots, /onUploadCancel: resetCalibrationChoice/);
   assert.doesNotMatch(slots, /q-slot-side.*withSex/);
   const load = side.slice(side.indexOf("async function load(file:"), side.indexOf("function showSideLoadFailure"));

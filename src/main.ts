@@ -3,6 +3,8 @@ import { initializeTheme } from "./ui/theme.js";
 import { createHomeNavigation } from "./ui/homeNavigation.js";
 import "./ui/theme.css";
 import { captureAttribution } from "./engine/attribution.js";
+import "./public-entry.js";
+import { trackAnalytics } from "./engine/analytics.js";
 import { startScanPerformanceAttempt } from "./engine/scanPerformance.js";
 import type { ScanPerformanceAttempt } from "./engine/scanPerformance.js";
 import { initLandmarker, isReady, setRunningMode } from "./engine/landmarker.js";
@@ -491,7 +493,7 @@ function scanIsCurrent(token: ScanToken, generation: number): boolean {
   c.getContext("2d")!.drawImage(img, 0, 0, w, h);
 
   const res = detectStable(c);
-  const quality = assessQuality(res);
+  const quality = assessQuality(res, { width: w, height: h });
   if (!quality.faceFound) return { faceFound: false };
   const landmarks = res.faceLandmarks[0];
   const faceBox = landmarkBox(landmarks);
@@ -1649,6 +1651,7 @@ el.btnCamera.addEventListener("click", async () => {
     el.camHintDetail.textContent = "Your session is still loading. Try capture again in a moment.";
     return;
   }
+  trackAnalytics("scan-started");
   const generation = ++scanGeneration;
   // A BURST, not a shutter.
   //
@@ -2000,6 +2003,10 @@ function resetToUpload(): void {
 
 async function handleFile(file: File, expectedGeneration = scanGeneration): Promise<void> {
   if (expectedGeneration !== scanGeneration) return;
+  // Selected file, before model/decoder work. No filename or pixels leave via
+  // analytics, including when preparation fails. Upload/paste/drop arrive
+  // here; the camera shutter emits the same page-deduplicated milestone.
+  trackAnalytics("scan-started");
   // Wait for the engine rather than refusing the photo. It used to say "engine
   // still loading" and drop the file on the floor, which asks somebody to
   // guess how long to wait and then pick the same picture again. Now the
@@ -2147,7 +2154,7 @@ async function handleCanvas(
   // Real math (milliseconds) happens inside the theatre beat (~2.2s)
   const finishInference = scanTiming?.start("front_inference");
   const result = detectStable(el.photoCanvas);
-  const quality = assessQuality(result);
+  const quality = assessQuality(result, { width, height });
   finishInference?.(quality.faceFound ? "success" : "error");
 
   if (!quality.faceFound) {
@@ -2277,21 +2284,26 @@ async function handleCanvas(
   drawCalm(el.overlayCanvas, landmarks, width, height);
   armLeaveGuard("scan");
   const method = captureMethod;
-  const finishReview = scanTiming?.start("capture_review");
-  const accepted = await confirmScanAction({
-    eyebrow: "CHECK YOUR PHOTO",
-    title: "Happy with this front photo?",
-    copy: "Use a clear, straight-on photo you are happy to be measured from. Retake it now if it is blurry, tilted or not the photo you want rated.",
-    confirmLabel: "Use this photo",
-    cancelLabel: "Retake photo",
-    preview: frontShot,
-    tone: "positive",
-  });
-  finishReview?.(accepted ? "success" : "cancelled");
-  if (!scanIsCurrent(token, generation)) return;
-  if (!accepted) {
-    retakeFront(method);
-    return;
+  // Picking or pasting a file already chooses the photograph. Only a newly
+  // captured camera frame needs a keep/retake decision. Validation above and
+  // the explicit side-landmark review are independent of this convenience.
+  if (method === "camera") {
+    const finishReview = scanTiming?.start("capture_review");
+    const accepted = await confirmScanAction({
+      eyebrow: "CHECK YOUR PHOTO",
+      title: "Happy with this front photo?",
+      copy: "Use a clear, straight-on photo you are happy to be measured from. Retake it now if it is blurry, tilted or not the photo you want rated.",
+      confirmLabel: "Use this photo",
+      cancelLabel: "Retake photo",
+      preview: frontShot,
+      tone: "positive",
+    });
+    finishReview?.(accepted ? "success" : "cancelled");
+    if (!scanIsCurrent(token, generation)) return;
+    if (!accepted) {
+      retakeFront(method);
+      return;
+    }
   }
   track("scan-front-done");
   el.status.innerHTML = "<b>Front captured.</b> Add a profile for the full analysis, or continue with the front.";

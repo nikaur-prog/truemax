@@ -7,6 +7,10 @@ const root = new URL("../../", import.meta.url);
 const pages = [
   ["/", "index.html"],
   ["/guides", "guides.html"],
+  ["/measurements", "measurements.html"],
+  ["/measurements/gonial-angle", "measurement-gonial-angle.html"],
+  ["/measurements/canthal-tilt", "measurement-canthal-tilt.html"],
+  ["/measurements/side-profile-analysis", "measurement-side-profile-analysis.html"],
   ["/face-score", "face-score.html"],
   ["/improve-your-looks", "improve-your-looks.html"],
   ["/looksmaxxing-guide", "looksmaxxing-guide.html"],
@@ -133,13 +137,16 @@ test("each searchable route has a static build entry and a clean-route rewrite",
   }
 });
 
-test("reading pages load only dedicated static styles and no executable application script", () => {
+test("reading pages keep app code out and allow only the dedicated public enhancement", () => {
   const files = [...pages.slice(1).map(([, file]) => file), "privacy.html", "terms.html", "delete-account.html"];
   for (const file of files) {
     const html = read(file);
     assert.match(html, /href="\/src\/static-site\.css"/, file);
     assert.doesNotMatch(html, /href="\/src\/style\.css"/, file);
-    for (const tag of html.matchAll(/<script([^>]*)>/g)) assert.match(tag[1], /type="application\/ld\+json"/, file);
+    for (const tag of html.matchAll(/<script([^>]*)>/g)) {
+      assert.ok(/type="application\/ld\+json"/.test(tag[1])
+        || /type="module" src="\/src\/public-entry\.ts"/.test(tag[1]), `${file} must not load the executable app`);
+    }
   }
   const css = read("src/static-site.css");
   assert.ok(Buffer.byteLength(css) < 15000, "static CSS source budget");

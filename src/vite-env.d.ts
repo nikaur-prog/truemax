@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly DEV: boolean;
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
+  /** Optional public GA4 stream ID. Missing, local and private routes stay off. */
+  readonly VITE_GA_MEASUREMENT_ID?: string;
   /** Enables the checked image-rendering step after its server route is live. */
   readonly VITE_MORPH_PREVIEW?: string;
 }

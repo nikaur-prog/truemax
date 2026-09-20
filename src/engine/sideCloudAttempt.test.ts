@@ -30,17 +30,20 @@ test("device-only public and admin attempts skip authentication and upload", asy
 });
 
 test("failed authentication and null cloud responses are unavailable, not disabled", async () => {
-  for (const getAccessToken of [async () => null, async () => { throw new Error("session unavailable"); }]) {
+  for (const [reason, getAccessToken] of [
+    ["auth-required", async () => null],
+    ["auth-unavailable", async () => { throw new Error("session unavailable"); }],
+  ] as const) {
     let uploads = 0;
     const result = await runSideCloudAttempt({
       ...input(), getAccessToken,
       request: async () => { uploads++; return { source: "cloud" }; },
     });
-    assert.deepEqual(result, { status: "unavailable", placement: null });
+    assert.deepEqual(result, { status: "unavailable", placement: null, reason });
     assert.equal(uploads, 0);
   }
   const result = await runSideCloudAttempt({ ...input(), request: async () => null });
-  assert.deepEqual(result, { status: "unavailable", placement: null });
+  assert.deepEqual(result, { status: "unavailable", placement: null, reason: "request-unavailable" });
 });
 
 test("successful placement keeps the exact cloud result", async () => {
@@ -59,7 +62,7 @@ test("admin deadline covers a hung token lookup and a late token cannot upload",
     request: async () => { uploads++; return { source: "cloud" }; },
   });
   t.mock.timers.tick(50);
-  assert.deepEqual(await pending, { status: "unavailable", placement: null });
+  assert.deepEqual(await pending, { status: "unavailable", placement: null, reason: "auth-timeout" });
   token.resolve("late token");
   await token.promise;
   await Promise.resolve();
@@ -81,11 +84,11 @@ test("authentication and request share one admin deadline and abort the request"
   assert.equal(requestSignal.aborted, false);
   t.mock.timers.tick(10);
   const result = await pending;
-  assert.deepEqual(result, { status: "unavailable", placement: null });
+  assert.deepEqual(result, { status: "unavailable", placement: null, reason: "timeout" });
   assert.equal(requestSignal.aborted, true);
   response.resolve({ source: "late cloud" });
   await response.promise;
-  assert.deepEqual(result, { status: "unavailable", placement: null });
+  assert.deepEqual(result, { status: "unavailable", placement: null, reason: "timeout" });
 });
 
 test("retake cancels a hung token lookup without an unavailable warning or late upload", async () => {
@@ -145,6 +148,11 @@ test("public capture does not inherit the admin total deadline", async (t) => {
 
 test("unexpected request errors recover in admin mode and preserve public failure behavior", async () => {
   const request = async () => { throw new Error("request failed"); };
-  assert.deepEqual(await runSideCloudAttempt({ ...input(), request }), { status: "unavailable", placement: null });
+  assert.deepEqual(await runSideCloudAttempt({ ...input(), request }), { status: "unavailable", placement: null, reason: "request-unavailable" });
   await assert.rejects(runSideCloudAttempt({ ...input(), mode: undefined, request }), /request failed/);
+});
+
+test("the bounded request reason survives the attempt without copying its response", async () => {
+  const result = await runSideCloudAttempt({ ...input(), request: async () => null, failureReason: () => "provider-credit" });
+  assert.deepEqual(result, { status: "unavailable", placement: null, reason: "provider-credit" });
 });

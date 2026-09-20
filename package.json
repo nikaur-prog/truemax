@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "calibration:preview": "node tools/calibration-preview.mjs",
     "test:calibration-preview": "node --test tools/calibration-preview.test.mjs",
+    "test:placement-pilot": "node --test tools/compare-placement-pilot.test.mjs tools/calibrate-side-placement.test.mjs",
     "postinstall": "node scripts/copy-wasm.mjs",
     "harvest": "node scripts/harvest-clips.mjs"
   },
@@ -23,7 +24,8 @@
     "html-to-image": "^1.11.13",
     "mediabunny": "^1.53.0",
     "stripe": "^22.5.0",
-    "three": "0.185.1"
+    "three": "0.185.1",
+    "web-vitals": "6.2.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

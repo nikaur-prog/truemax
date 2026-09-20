@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ALLOWANCE_WARN_AT, MAX_DAILY_MESSAGES, allowanceLine, formatMaxReturn, nextUtcMidnight } from "./maxAllowance.js";
+import { ALLOWANCE_WARN_AT, MAX_DAILY_MESSAGES, allowanceLine, formatMaxReturn, nextUtcMidnight, parseMaxRemaining } from "./maxAllowance.js";
+
+test("missing or malformed quota metadata does not invent an exhausted balance", () => {
+  for (const value of [null, "", " ", "NaN", "-1", "1.5", "Infinity", "5x"]) {
+    assert.equal(parseMaxRemaining(value), null);
+    assert.equal(allowanceLine(parseMaxRemaining(value), null), null);
+  }
+  assert.equal(parseMaxRemaining("0"), 0);
+  assert.equal(parseMaxRemaining(" 5 "), 5);
+  assert.equal(parseMaxRemaining("30"), 30);
+});
 
 // The paywall's benefit line and the server's ceiling are one number. The
 // tab sold "Unlimited chats" over a wall of thirty for a whole cycle because

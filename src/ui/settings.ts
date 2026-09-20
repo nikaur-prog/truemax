@@ -24,6 +24,7 @@ import { isAdult } from "../engine/age.js";
 import { openBodyProfileDialog } from "./bodyProfileDialog.js";
 import { mountRoutineHistorySettings } from "./routineHistorySettings.js";
 import { mountThemeSetting } from "./theme.js";
+import { mountAnalyticsSetting } from "./analyticsConsent.js";
 import {
   readGoalPreviewConsent,
   revokeGoalPreviewConsent,
@@ -63,6 +64,7 @@ import {
 let host: HTMLDivElement | null = null;
 let disposeRoutineHistory: (() => void) | null = null;
 let disposeThemeSetting: (() => void) | null = null;
+let disposeAnalyticsSetting: (() => void) | null = null;
 
 const esc = (value: string): string =>
   value.replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char] || char);
@@ -71,6 +73,8 @@ const toggle = (values: string[], value: string): string[] =>
   values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 
 function close(): void {
+  disposeAnalyticsSetting?.();
+  disposeAnalyticsSetting = null;
   disposeThemeSetting?.();
   disposeThemeSetting = null;
   disposeRoutineHistory?.();
@@ -254,6 +258,8 @@ export async function openSettings(user: User): Promise<void> {
           <div data-theme-setting></div>
         </section>
 
+        <section class="set-group" data-analytics-setting></section>
+
         <section class="set-group">
           <h3>Who you are</h3>
           <div class="set-avatar-row">
@@ -342,6 +348,8 @@ export async function openSettings(user: User): Promise<void> {
 
     activeHost.querySelector(".trial-close")?.addEventListener("click", close);
     disposeThemeSetting = mountThemeSetting(activeHost.querySelector("[data-theme-setting]"));
+    disposeAnalyticsSetting?.();
+    disposeAnalyticsSetting = mountAnalyticsSetting(activeHost.querySelector("[data-analytics-setting]"));
     disposeRoutineHistory = mountRoutineHistorySettings(activeHost.querySelector("[data-routine-history]"), user.id);
     activeHost.querySelector("#set-cancel")?.addEventListener("click", close);
 

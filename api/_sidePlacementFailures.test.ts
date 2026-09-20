@@ -31,7 +31,7 @@ const seed: SidePoints = {
 };
 const hint = cloudSideSeedFractions(seed, 1000, 1400, 1)!;
 const bytes = () => sharp({ create: { width: 100, height: 140, channels: 3, background: "white" } }).jpeg().toBuffer();
-type Mode = "throw" | "refuse" | "malformed" | "coarse-ear" | "fine-ear";
+type Mode = "throw" | "credit" | "refuse" | "malformed" | "coarse-ear" | "fine-ear";
 
 function provider(mode: Mode) {
   let calls = 0;
@@ -41,6 +41,7 @@ function provider(mode: Mode) {
   }) => {
     calls += 1;
     if (mode === "throw") throw new Error("synthetic provider failure");
+    if (mode === "credit") throw Object.assign(new Error("Your credit balance is too low. private billing detail"), { status: 400 });
     const ids = body.tools[0].input_schema.required;
     const fine = body.messages[0].content.filter((entry) => entry.type === "image").length === 2;
     const accept = ids.length === 2 && ids.includes("tragion") && (
@@ -145,6 +146,39 @@ test("rate-limited placement neither calls the provider nor releases an unclaime
   const rpcs: string[] = [];
   const response = await handler(mock, rpcs, -1)(await request());
   assert.equal(response.status, 429);
+  assert.equal(mock.calls(), 0);
+  assert.deepEqual(rpcs, ["claim_side_landmark_pass"]);
+  assert.equal((await response.json()).code, "rate-limited");
+});
+
+test("provider credit failures survive failed crop rounds without leaking provider details", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const rpcs: string[] = [];
+  const response = await handler(provider("credit"), rpcs)(await request());
+  assert.equal(response.status, 502);
+  const payload = await response.json();
+  assert.equal(payload.code, "provider-credit");
+  assert.equal(JSON.stringify(payload).includes("billing"), false);
+  assert.deepEqual(rpcs, ["claim_side_landmark_pass", "release_side_landmark_pass"]);
+});
+
+test("allowance failure is distinguished before any photo reaches the provider", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const mock = provider("throw");
+  const rpcs: string[] = [];
+  const post = createSidePlacementHandler({
+    client: () => mock.client,
+    authenticatedUser: async () => ({ id: "synthetic-user" }) as User,
+    getSupabaseAdmin: () => ({ rpc: async (name: string) => {
+      rpcs.push(name);
+      return { data: null, error: { message: "private infrastructure detail" } };
+    } }) as unknown as ReturnType<typeof getSupabaseAdmin>,
+  });
+  const response = await post(await request());
+  assert.equal(response.status, 503);
+  const payload = await response.json();
+  assert.equal(payload.code, "allowance-unavailable");
+  assert.equal(JSON.stringify(payload).includes("private"), false);
   assert.equal(mock.calls(), 0);
   assert.deepEqual(rpcs, ["claim_side_landmark_pass"]);
 });

@@ -1,6 +1,8 @@
 import { openMaxChat, closeMaxChat } from "./maxChat.js";
 import { maxCharacterMarkup } from "./maxCharacter.js";
 import { mountMaxAvatar3D, type MaxAvatar3DState } from "./maxAvatar3d.js";
+import { mountMaxSpeechBubble } from "./maxSpeechBubble.js";
+import { maxTextMouthLevel } from "./maxSpeechText.js";
 
 /** Development fixture using the real production chat layout and avatar bridge. */
 export function mountMaxCoachPreview(container: HTMLElement = document.body): () => void {
@@ -36,6 +38,7 @@ export function mountMaxCoachPreview(container: HTMLElement = document.body): ()
     const current = chat;
     current.dataset.localFixture = "true";
     const avatar = mountMaxAvatar3D(current.querySelector(".maxchat-face"));
+    const speech = mountMaxSpeechBubble(current.querySelector<HTMLElement>(".maxchat-speech")!);
     const form = current.querySelector<HTMLFormElement>(".maxchat-composer")!;
     const input = form.querySelector<HTMLInputElement>("input")!;
     const log = current.querySelector<HTMLElement>(".maxchat-log")!;
@@ -60,7 +63,7 @@ export function mountMaxCoachPreview(container: HTMLElement = document.body): ()
       questionRow.className = "maxchat-msg maxchat-you"; questionRow.textContent = question;
       const reply = document.createElement("p");
       reply.className = "maxchat-msg maxchat-max"; reply.textContent = "Thinking...";
-      log.append(questionRow, reply); avatar.setState("thinking");
+      log.append(questionRow, reply); speech.clear(); avatar.setState("thinking");
       timer = setTimeout(() => {
         if (!current.isConnected) { stop(); return; }
         avatar.setState("speaking");
@@ -69,8 +72,10 @@ export function mountMaxCoachPreview(container: HTMLElement = document.body): ()
         const reveal = (): void => {
           if (!current.isConnected) { stop(); return; }
           count++; reply.textContent = words.slice(0, count).join(" "); log.scrollTop = log.scrollHeight;
+          speech.update(reply.textContent, { animate: false, complete: count === words.length });
+          avatar.setSpeechLevel(maxTextMouthLevel(words[count - 1].charAt(0)));
           if (count < words.length) timer = setTimeout(reveal, 95);
-          else { timer = null; busy = false; input.disabled = false; avatar.setState("idle"); }
+          else { timer = null; busy = false; input.disabled = false; avatar.setSpeechLevel(null); avatar.setState("idle"); }
         };
         reveal();
       }, 1000);

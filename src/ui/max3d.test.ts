@@ -244,28 +244,59 @@ test("skate first shows the board, drops it into place, then performs one airbor
     "board lands at its riding height");
 });
 
-test("approved speaking and the other nine untouched clips retain their exact authored motion", () => {
+test("the eight untouched clips retain their exact authored motion", () => {
   // Canonical numeric channel hashes from the pre-polish asset. Ignore binary
   // offsets and node ordering, which legitimately change when props are rebuilt.
   const approved: Record<string, string> = {
     idle: "07cf4509fa1697124e17235ae30eb20f3d74a32a07bfc22e35a7cf2d2d121f11",
     listening: "7059b480fb6ed09a10cf37ff97306c1d369d3dc6546864f011efd4ab5d88b5c5",
     thinking: "969edd002fb0b1f2f4019be918af4571065d02cd639a4edfcddfc10776e24aa3",
-    speaking: "189aaaf4f95044daa1ccb116029ac9805fec030193b36d96419eafe5f5419058",
     celebrate: "5db9500b3573149ef71ca59210cac855d2ffdaa158d8b195e3729e528819ada5",
     quiet: "27c88783644b0e49b9652e3c1179b30bc5df966406b920b5484b096885701235",
-    wave: "ad6aa3943dfb336892f3ec8eb19cd254b2da47b77a454663a854544fbc1b1350",
     shocked: "91b1653a5b0e3453838fa82f5d061aa57300a5b2584020f474b9df7ca3b494d2",
     angry: "7915902f8e3bf7640d219e351d8bb064db00e5c76289f870ebd2c494a8e412df",
     guitar: "a93a5223287ea8697398396946776aecac3becb52c051cc50e99ceb0e1dd7238",
   };
   for (const [name, expected] of Object.entries(approved)) {
     const clip = gltf.animations.find((clip: { name: string }) => clip.name === name);
-    const canonical = clip.channels.map((channel: { sampler: number; target: { node: number; path: string } }) => {
+    const canonical = clip.channels.filter((channel: { target: { node: number } }) => gltf.nodes[channel.target.node].name !== "MirrorFingerGesture").map((channel: { sampler: number; target: { node: number; path: string } }) => {
       const sampler = clip.samplers[channel.sampler];
       return { name: gltf.nodes[channel.target.node].name, path: channel.target.path, time: values(sampler.input), value: values(sampler.output) };
     }).sort((a: { name: string; path: string }, b: { name: string; path: string }) => `${a.name}.${a.path}`.localeCompare(`${b.name}.${b.path}`));
     assert.equal(createHash("sha256").update(JSON.stringify(canonical)).digest("hex"), expected, `${name} must keep its approved motion`);
+  }
+});
+
+test("mirror gesture points into the mirror with a raised thumb, grin and connected flipper", () => {
+  const nodes = gltf.nodes.map((node: { name: string }) => node.name);
+  for (const name of ["GesturePalm", "GestureIndex", "GestureThumb", "MouthTeeth", "MouthTongue"]) assert.ok(nodes.includes(name));
+  const at = 0.53125;
+  assert.ok(transformAt("mirror", "MirrorFingerGesture", "scale", at).every((value) => value > 0.99));
+  const hand = positionAt("mirror", "MirrorFingerGesture", at);
+  const flipper = new Vector3(-0.27, -0.67, 0.055).applyQuaternion(rotationAt("mirror", "ArmLeft", at)).add(positionAt("mirror", "ArmLeft", at));
+  assert.ok(hand.distanceTo(flipper) < 0.00001, "gesture stays attached to the reaching flipper");
+  const direction = new Vector3(1, 0, 0).applyQuaternion(rotationAt("mirror", "MirrorFingerGesture", at));
+  const mirror = positionAt("mirror", "MirrorProp", at).add(new Vector3(0, 0.58, 0));
+  assert.ok(direction.dot(mirror.sub(hand).normalize()) > 0.99, "index points at the reflection, not at the viewer");
+  const grin = transformAt("mirror", "MouthOpen", "scale", at);
+  assert.ok(grin[0] > 1.3 && grin[1] > 0.5, "broad grin reveals the teeth and tongue");
+  for (const clip of MAX_3D_STATES) for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+    if (clip === "mirror" && fraction > 0 && fraction < 1) continue;
+    assert.deepEqual(transformAt(clip, "MirrorFingerGesture", "scale", fraction), [0, 0, 0], "no stray hand after an interruption or in other clips");
+  }
+});
+
+test("welcome wave bounces above its stable shadow and smiles while speaking has real pauses", () => {
+  const rise = positionAt("wave", "Body", 0.5).y;
+  assert.ok(rise > 0.2, "the entrance has a readable happy bounce");
+  assert.deepEqual(positionAt("wave", "MaxRoot", 0.5).toArray(), [0, 0, 0], "floor shadow does not jump with Max");
+  assert.ok(transformAt("wave", "MouthOpen", "scale", 0.5)[1] > 0.5);
+  assert.ok(transformAt("speaking", "MouthOpen", "scale", 0.40625)[1] < 0.001, "authored speech has a short closed-mouth pause");
+  assert.ok(transformAt("speaking", "MouthOpen", "scale", 0.5)[1] > 0.8, "mouth resumes speaking after the pause");
+  const opening = gltf.nodes.find((node: { name: string }) => node.name === "MouthOpen");
+  for (const name of ["MouthTeeth", "MouthTongue"]) {
+    const index = gltf.nodes.findIndex((node: { name: string }) => node.name === name);
+    assert.ok(opening.children.includes(index), "audio-level overlay scales every inner mouth detail together");
   }
 });
 

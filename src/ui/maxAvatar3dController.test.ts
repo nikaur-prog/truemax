@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 import { createMaxAvatar3DManager } from "./maxAvatar3dController.js";
 import type { MaxAvatar3DState } from "./maxAvatar3dController.js";
 import type { Max3DHandle } from "./max3d.js";
@@ -117,6 +118,21 @@ test("real chat and paid Coach surfaces mount the bridge while the scan flow sta
   assert.match(chat, /chatAvatar\?\.setState\("thinking"\)/);
   assert.match(chat, /chatAvatar\?\.setState\("speaking"\)/);
   assert.match(chat, /input\.value\.trim\(\) \? "listening" : "idle"/);
-  assert.match(coach, /if \(opts\.paid\) mountMaxAvatar3D/);
+  const syntax = ts.createSourceFile("maxTab.ts", coach, ts.ScriptTarget.ES2020, true);
+  let presenceCalls = 0;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.getText(syntax) === "mountDashboardPresence") {
+      presenceCalls++;
+      let branch: ts.Node | undefined = node.parent;
+      while (branch && !(ts.isIfStatement(branch) && branch.expression.getText(syntax) === "opts.paid")) branch = branch.parent;
+      assert.ok(branch && ts.isIfStatement(branch), "the Coach presence is mounted only in the paid branch");
+      assert.ok(node.getStart(syntax) >= branch.thenStatement.getStart(syntax) && node.end <= branch.thenStatement.end,
+        "the unpaid branch must not mount the paid presence indirectly");
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(syntax);
+  assert.equal(presenceCalls, 1);
+  assert.match(coach.slice(coach.indexOf("function mountDashboardPresence(")), /mountMaxAvatar3D\(face, \{ state: "idle" \}\)/);
   assert.doesNotMatch(scan, /maxAvatar3d|max3dRuntime|mountMax3D/);
 });

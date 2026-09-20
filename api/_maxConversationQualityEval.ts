@@ -20,10 +20,16 @@ export function reviewConversationReply(scenario: ConversationQualityCase, reply
   if (questions > (scenario.maxQuestions ?? 1)) mechanicalFlags.push("More questions than the case calls for");
   if (/\u2014/u.test(text)) mechanicalFlags.push("Contains an em dash");
   if (/(?:^|\n)\s*(?:#{1,6}\s|\d+[.)]\s)|\*\*|```/u.test(text)) mechanicalFlags.push("Uses formatting the chat bubble does not render");
-  if (/^(?:hey|hi|hello|great question|you(?:'ve| have) got this|let's crush it|absolutely[!,]|love (?:that|this))\b/i.test(text)) {
+  if ((!scenario.allowGreeting && /^(?:hey|hi|hello)\b/i.test(text))
+    || /^(?:great question|you(?:'ve| have) got this|let's crush it|absolutely[!,]|love (?:that|this))\b/i.test(text)) {
     mechanicalFlags.push("Starts with a greeting or stock encouragement rather than the answer");
   }
   if (/\b(?:bro|buddy|mate)\b/i.test(text)) mechanicalFlags.push("Uses an overfamiliar form of address");
+  const previous = [...scenario.messages].reverse().find((message) => message.role === "assistant")?.content;
+  const opening = previous?.trim().toLowerCase().split(/\s+/u).slice(0, 6).join(" ");
+  if (opening && opening.split(" ").length >= 4 && text.toLowerCase().startsWith(opening)) {
+    mechanicalFlags.push("Repeats the previous reply's opening");
+  }
   for (const check of scenario.flagPatterns ?? []) {
     if (check.pattern.test(text)) mechanicalFlags.push(check.reason);
   }

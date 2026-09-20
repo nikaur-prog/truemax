@@ -57,6 +57,7 @@ let dashboardBrand: Exclude<MembershipBrand, "guest"> = "member";
 // Whether the Max tab opens the chat (paid) or the frosted upgrade room
 // (adult, unpaid). Held at open time for fillView, which runs lazily.
 let dashboardPaidMax = false;
+let dashboardName: string | null = null;
 
 // Two half-faces sharing one outline: a squarer, heavier-browed left half and a
 // softer, narrower right half, split down the facial midline. It says "this
@@ -161,6 +162,7 @@ export function openDashboard(opts: {
   // already restricts to adults). Everyone else gets a three-tab bar.
   const maxTab = Boolean(opts.adult) || opts.membership === "max";
   dashboardPaidMax = opts.membership === "max";
+  dashboardName = opts.name ?? null;
   // Advance the rotation once per open, so coming back to the dashboard gives a
   // different headline and a different quote rather than the same pair all day.
   nextVisit();
@@ -350,7 +352,7 @@ function fillView(name: ViewName, panel: HTMLElement): void {
     wireFaces(panel);
   } else if (name === "max") {
     panel.innerHTML = maxTabMarkup(dashboardPaidMax);
-    wireMaxTab(panel, { paid: dashboardPaidMax });
+    wireMaxTab(panel, { paid: dashboardPaidMax, name: dashboardName });
   }
 }
 
@@ -386,6 +388,7 @@ export function close(): void {
   closeCelebDetail(false);
   overlay?.remove();
   overlay = null;
+  dashboardName = null;
   currentView = "home";
   scrollMemory.clear();
 }

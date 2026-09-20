@@ -16,7 +16,7 @@ export const MAX_CLIPS = ["idle", "listening", "thinking", "speaking", "celebrat
 export function buildMax3D() {
   const root = new THREE.Group();
   root.name = "MaxRoot";
-  root.userData = { asset: "TrueMax original SVG-faithful character", version: 4, rig: "rigid transform hierarchy", units: "metres", forward: "+Z", up: "+Y", identitySource: "src/ui/maxCharacter.ts" };
+  root.userData = { asset: "TrueMax original SVG-faithful character", version: 5, rig: "rigid transform hierarchy", units: "metres", forward: "+Z", up: "+Y", identitySource: "src/ui/maxCharacter.ts" };
   const body = new THREE.Group(); body.name = "Body"; root.add(body);
   // The approved drawing is the identity, including its matte blue gradient.
   // Vertex colors keep that palette under every scene light. This is real
@@ -165,9 +165,20 @@ export function buildMax3D() {
   const smile = new THREE.Group(); smile.name = "MouthSmile"; mouth.add(smile);
   stroke("Smile", [[66, 84.5], [75, 92], [84, 84.5]], 3, 0xe9f6ff, smile, mouth.position);
   const mouthOpen = new THREE.Group(); mouthOpen.name = "MouthOpen"; mouthOpen.position.y = 0.015; mouthOpen.scale.setScalar(0); mouth.add(mouthOpen);
-  const cavity = mesh("MouthCavity", solid(new THREE.SphereGeometry(1, 24, 12), 0x050b18), palette, mouthOpen); cavity.scale.set(0.205, 0.1955, 0.03);
-  const lip = mesh("MouthOpeningRim", solid(new THREE.TorusGeometry(0.215, 0.018, 8, 32), 0xe9f6ff), palette, mouthOpen); lip.scale.set(1, 0.952, 1); lip.position.z = 0.028;
-  const tongue = mesh("MouthInnerLight", solid(new THREE.SphereGeometry(1, 16, 8), 0xb6dcff), palette, mouthOpen); tongue.scale.set(0.1, 0.0374, 0.018); tongue.position.set(0, -0.11475, 0.035);
+  const opening = new THREE.Shape();
+  opening.moveTo(-0.215, 0.1); opening.quadraticCurveTo(0, 0.026, 0.215, 0.1);
+  opening.bezierCurveTo(0.195, -0.105, 0.13, -0.183, 0, -0.183);
+  opening.bezierCurveTo(-0.13, -0.183, -0.195, -0.105, -0.215, 0.1);
+  mesh("MouthCavity", solid(new THREE.ShapeGeometry(opening, 14), 0x050b18), palette, mouthOpen);
+  const openingPath = new THREE.CatmullRomCurve3(opening.getPoints(14).slice(0, -1).map((p) => new THREE.Vector3(p.x, p.y, 0.028)), true);
+  mesh("MouthOpeningRim", solid(new THREE.TubeGeometry(openingPath, 36, 0.009, 6, true), 0xe9f6ff), palette, mouthOpen);
+  // Teeth and tongue live inside the opening rig: authored syllables and the
+  // optional audio envelope reveal exactly the same cartoon mouth geometry.
+  const teethShape = new THREE.Shape();
+  teethShape.moveTo(-0.17, 0.079); teethShape.quadraticCurveTo(0, 0.025, 0.17, 0.079);
+  teethShape.lineTo(0.15, 0.008); teethShape.quadraticCurveTo(0, -0.029, -0.15, 0.008); teethShape.closePath();
+  const teeth = mesh("MouthTeeth", solid(new THREE.ShapeGeometry(teethShape, 10), 0xf5fbff), palette, mouthOpen); teeth.position.z = 0.045;
+  const tongue = mesh("MouthTongue", solid(new THREE.SphereGeometry(1, 12, 8), 0xf595b3), palette, mouthOpen); tongue.scale.set(0.108, 0.043, 0.016); tongue.position.set(0, -0.105, 0.047);
   for (const [name, sign] of [["ArmLeft", -1], ["ArmRight", 1]]) {
     const arm = new THREE.Group(); arm.name = name; arm.position.set(sign * 41 * U, Y(92), front(sign * 41 * U, Y(92)) - 0.04); body.add(arm);
     const point = (x, y) => new THREE.Vector2((x - 116) * U * sign, (92 - y) * U);
@@ -196,6 +207,18 @@ export function buildMax3D() {
   const mirrorFace = mesh("MirrorFace", solid(new THREE.CircleGeometry(0.265, 32), 0xd9ecfb), palette, mirror); mirrorFace.position.set(0, 0.58, 0.01);
   const mirrorBack = mesh("MirrorBack", solid(new THREE.CylinderGeometry(0.275, 0.275, 0.06, 32), 0x18335b), palette, mirror); mirrorBack.rotation.x = Math.PI / 2; mirrorBack.position.set(0, 0.58, -0.035);
   const reflection = mesh("MirrorGlint", solid(new THREE.BoxGeometry(0.065, 0.32, 0.012), 0xffffff), palette, mirror); reflection.position.set(-0.06, 0.58, 0.02); reflection.rotation.z = -0.45;
+  // A tiny mitten extension appears only for the mirror gag. It is a friendly
+  // pointing index and raised thumb, not a weapon prop or a human hand rig.
+  const fingerGun = prop("MirrorFingerGesture");
+  const palm = mesh("GesturePalm", solid(new THREE.SphereGeometry(1, 12, 8), 0x24488d), palette, fingerGun); palm.scale.set(0.13, 0.12, 0.08);
+  const finger = (name, from, to, radius) => {
+    const start = new THREE.Vector3(...from), end = new THREE.Vector3(...to), direction = end.clone().sub(start);
+    const digit = mesh(name, solid(new THREE.CylinderGeometry(radius, radius, direction.length(), 8), 0x315ba6), palette, fingerGun);
+    digit.position.copy(start).lerp(end, 0.5); digit.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+    const cap = mesh(`${name}Tip`, solid(new THREE.SphereGeometry(radius, 8, 6), 0x315ba6), palette, fingerGun); cap.position.copy(end);
+  };
+  finger("GestureIndex", [0.035, 0.044, 0.01], [0.34, 0.044, 0.01], 0.045);
+  finger("GestureThumb", [-0.048, 0.045, 0.01], [-0.082, 0.235, 0.01], 0.049);
   const skate = prop("SkateProp");
   // Independent of Body so Max can jump above the board while it flips.
   root.add(skate);
@@ -229,7 +252,7 @@ export function buildMax3D() {
   const bridge = mesh("GuitarBridge", solid(new THREE.BoxGeometry(0.19, 0.035, 0.04), 0x18335b), palette, guitar); bridge.position.set(0, -0.15, 0.12);
   for (const x of [-0.028, 0, 0.028]) { const string = mesh(`GuitarString${x}`, solid(new THREE.BoxGeometry(0.004, 1.48, 0.004), 0xe9f6ff), palette, guitar); string.position.set(x, 0.59, 0.13); }
 
-  const animated = [root, body, eyes, ...["LeftEye", "RightEye", "LeftBrowRig", "RightBrowRig", "ArmLeft", "ArmRight"].map((name) => root.getObjectByName(name)), mouth, smile, mouthOpen, antenna, mirror, skate, guitar];
+  const animated = [root, body, eyes, ...["LeftEye", "RightEye", "LeftBrowRig", "RightBrowRig", "ArmLeft", "ArmRight"].map((name) => root.getObjectByName(name)), mouth, smile, mouthOpen, antenna, mirror, fingerGun, skate, guitar];
   const rest = Object.fromEntries(animated.map((node) => [node.name, { position: node.position.toArray(), quaternion: node.quaternion.toArray(), scale: node.scale.toArray() }]));
   const periodic = (t) => 0.5 - 0.5 * Math.cos(2 * Math.PI * t);
   const smooth = (value) => { const t = THREE.MathUtils.clamp(value, 0, 1); return t * t * (3 - 2 * t); };
@@ -276,7 +299,9 @@ export function buildMax3D() {
       rotate("LeftBrowRig", [0, 0, ease * 0.18]); offset("LeftBrowRig", [0, ease * 0.1, ease * 0.04]);
       rotate("ArmLeft", [0, -ease * 0.1, -ease * 0.32]);
     } else if (name === "speaking") {
-      open((0.23 + periodic(t * 5) * 0.76) * ease, 0.88 + periodic(t * 3) * 0.12);
+      const syllable = Math.max(periodic(t * 7), periodic(t * 4 + 0.17) * 0.8);
+      const pause = 1 - smooth(pulse(t, 0.40625, 0.048));
+      open((0.12 + syllable * 0.94) * ease * pause, 1.03 + periodic(t * 3) * 0.22);
       rotate("Body", [Math.sin(t * Math.PI * 6) * ease * 0.1, Math.sin(t * Math.PI * 2) * ease * 0.09, 0]);
       rotate("ArmRight", [ease * 0.35, 0, ease * (0.5 + periodic(t * 2) * 0.4)]);
       rotate("ArmLeft", [0, 0, -ease * 0.35]);
@@ -287,10 +312,14 @@ export function buildMax3D() {
       rotate("ArmLeft", [0, 0, -ease * 2.55]); rotate("ArmRight", [0, 0, ease * 2.55]);
       open(ease * 0.55, 1.12); state.LeftEye.scale = state.RightEye.scale = [1 + ease * 0.04, 1 - ease * 0.15, 1];
     } else if (name === "wave") {
-      rotate("Body", [0, -ease * 0.14, -ease * 0.1]);
+      const bounce = Math.sin(t * Math.PI * 3) ** 2;
+      rotate("Body", [0, -ease * 0.1, -ease * 0.08 + wave * ease * 0.04]);
       rotate("ArmRight", [ease * 0.14, 0, ease * (2.6 + Math.sin(t * Math.PI * 10) * 0.32)]);
-      rotate("ArmLeft", [0, 0, -ease * 0.2]);
-      offset("MaxRoot", [0, ease * 0.06, 0]);
+      rotate("ArmLeft", [0, 0, -ease * (0.3 + bounce * 0.18)]);
+      offset("Body", [0, ease * (0.055 + bounce * 0.16), 0]);
+      state.Body.scale = [1 - bounce * ease * 0.018, 1 + bounce * ease * 0.026, 1];
+      open(ease * 0.53, 1.24);
+      offset("LeftBrowRig", [0, ease * 0.035, 0]); offset("RightBrowRig", [0, ease * 0.035, 0]);
     } else if (name === "shocked") {
       open(ease * 1.05, 0.78); state.LeftEye.scale = state.RightEye.scale = [1 + ease * 0.17, 1 + ease * 0.2, 1];
       offset("LeftBrowRig", [0, ease * 0.19, ease * 0.07]); offset("RightBrowRig", [0, ease * 0.19, ease * 0.07]);
@@ -309,14 +338,24 @@ export function buildMax3D() {
       // Hold it ahead of the visor, reflective face toward Max, not beside his ear.
       state.MirrorProp.position = grip; rotate("MirrorProp", [0, -2.40, 0]);
       aim(state, "ArmRight", [0.9, -0.35, 0.83], grip, ease);
-      rotate("Body", [-ease * 0.025, ease * 0.03, -ease * 0.045]);
-      rotate("Eyes", [0, ease * 0.075, 0]);
-      rotate("ArmLeft", [ease * 0.16, 0, -ease * 0.3]);
+      const inspect = smooth((t - 0.17) / 0.12) * (1 - smooth((t - 0.72) / 0.1));
+      const point = smooth((t - 0.35) / 0.10) * (1 - smooth((t - 0.67) / 0.10));
+      const recoil = smooth(pulse(t, 0.578125, 0.065));
+      rotate("Body", [-ease * 0.025 + recoil * 0.055, inspect * 0.09, -ease * 0.045]);
+      rotate("Eyes", [inspect * 0.018, inspect * 0.095, 0]);
+      const hand = new THREE.Vector3(-1.11, -0.88, 0.83).lerp(new THREE.Vector3(-0.47 - recoil * 0.10, -0.05 + recoil * 0.07, 1.45), point);
+      const target = new THREE.Vector3(...grip).add(new THREE.Vector3(0, 0.58, 0));
+      const gestureRotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), target.sub(hand).normalize());
+      state.MirrorFingerGesture.position = hand.toArray(); state.MirrorFingerGesture.quaternion = gestureRotation.toArray();
+      state.MirrorFingerGesture.scale = [point, point, point];
+      aim(state, "ArmLeft", [-0.94, -0.29, 0.83], hand.toArray(), point);
       const wink = smooth(pulse(t, 0.53125, 0.065));
       state.LeftEye.scale = [1, 1 - wink * 0.95, 1];
       offset("LeftBrowRig", [0, -wink * 0.055, ease * 0.02]);
       offset("RightBrowRig", [0, wink * 0.1, ease * 0.02]);
-      state.MouthSmile.scale = [1 + wink * 0.12, 1, 1];
+      const grin = smooth((t - 0.40) / 0.11) * (1 - smooth((t - 0.73) / 0.10));
+      open(grin * 0.63, 1.42);
+      rotate("Mouth", [0, 0, -wink * 0.07]);
     } else if (name === "skate") {
       // Reveal the rounded deck, trucks and wheels for a beat before riding.
       const reveal = smooth((t - 0.04) / 0.11);
@@ -384,7 +423,7 @@ export async function generateMaxAsset() {
   const directory = resolve(dirname(fileURLToPath(import.meta.url)), "../public/brand");
   await mkdir(directory, { recursive: true });
   await writeFile(resolve(directory, "max-rig-v1.glb"), new Uint8Array(binary));
-  const manifest = { version: 4, source: "scripts/build-max-3d.mjs", identitySource: "src/ui/maxCharacter.ts", identity: "Round original oval Max with pupil-less light bars, inset visor, navy flippers and expressive prop routines", rig: "rigid transform hierarchy", triangles, materials, bytes: binary.byteLength, clips: MAX_CLIPS, license: "Original TrueMax project asset. No third-party source meshes or textures.", approved: false };
+  const manifest = { version: 5, source: "scripts/build-max-3d.mjs", identitySource: "src/ui/maxCharacter.ts", identity: "Round original oval Max with pupil-less light bars, inset visor, navy flippers and expressive prop routines", rig: "rigid transform hierarchy", triangles, materials, bytes: binary.byteLength, clips: MAX_CLIPS, license: "Original TrueMax project asset. No third-party source meshes or textures.", approved: false };
   await writeFile(resolve(directory, "max-rig-v1.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify(manifest));
 }

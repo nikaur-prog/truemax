@@ -1,10 +1,9 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { REGION_NAMES, phi } from "../engine/scoring.js";
 import { directionFor, distFor } from "../engine/metrics.js";
-import { statedPct } from "../engine/precision.js";
-import { CELEB_MATCH_MIN_PCT, regionMatches } from "../engine/celebs.js";
+import { CELEBS, CELEB_MATCH_MIN_PCT, regionMatches } from "../engine/celebs.js";
 import { RELIABLE_MIN, reliabilityOf } from "../engine/reliability.js";
-import type { RegionId, ScoredMetric, Sex } from "../engine/types.js";
+import type { RegionId, RegionScore, ScoredMetric, Sex } from "../engine/types.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import { animateMeasurement, measurementBounds, prefersReducedOverlayMotion } from "./measureOverlay.js";
 import type { OverlayFade } from "./measureOverlay.js";
@@ -12,10 +11,10 @@ import { animateSideMeasurement, hasSideOverlay, sideMeasurementBounds } from ".
 import { applyZoom, zoomToBounds } from "./zoomTransform.js";
 import type { ZoomSpec } from "./zoomTransform.js";
 import { zoomFor } from "./regions.js";
-import { fmt, metricTrait, rankShort } from "./templates.js";
+import { fmt, metricTrait, wasMeasured } from "./templates.js";
 import { metricRead } from "../engine/metricReads.js";
-import { scoreTone } from "./scoreTone.js";
-import { celebrityPortraitImage, celebrityPortraitCredits, installCelebrityPortraitFallback } from "./celebrityPortrait.js";
+import { metricFit, metricModelScoreLabel } from "./metricFit.js";
+import { celebrityPortraitFigure, celebrityPortraitCredits, installCelebrityPortraitFallback, PORTRAIT_DISCLOSURE } from "./celebrityPortrait.js";
 import { createStagePaint } from "./stagePaint.js";
 import { rasterSizeFor, sidePointsForRaster } from "./interactiveRaster.js";
 
@@ -29,7 +28,7 @@ import { rasterSizeFor, sidePointsForRaster } from "./interactiveRaster.js";
 // that exact feature with the construction drawn on it, what the number means,
 // where it sits against the norm, and which reference faces measure the same.
 //
-// Navigation is the point of the design. Prev/next walks the region's
+// Navigation is the point of the design. Prev/next walks the report's
 // measurements and the camera PANS from feature to feature — one interpolated
 // translate+scale move (see zoomTransform.ts) while the departing figure
 // dissolves and the next draws on. That glide is what the deck of static rows
@@ -87,20 +86,22 @@ export function stageViewFor(
 
 /** Step through the deck without wrapping — a counter that wraps lies. */
 export function stepIndex(index: number, delta: number, total: number): number {
-  return Math.min(total - 1, Math.max(0, index + delta));
+  return Math.max(0, Math.min(total - 1, Math.max(0, index + delta)));
 }
 
-/** A short, human read for the score shown beside one measurement. */
-export function metricScoreLabel(score: number, name: string): string {
-  if (!Number.isFinite(score)) return "Not scored";
-  const quality = score >= 7.5
-    ? "High model score"
-    : score >= 6
-      ? "Above-reference score"
-      : score >= 4.5
-        ? "Mid-range model score"
-        : "Below-reference score";
-  return `${quality} for ${name.toLowerCase()}`;
+/** Region headings organize a report, but must not be navigation dead ends. */
+export function measurementDeck(
+  regions: readonly Pick<RegionScore, "metrics">[],
+  view: "all" | "side" = "all",
+): ScoredMetric[] {
+  const seen = new Set<string>();
+  return regions.flatMap(region => region.metrics).filter(metric => {
+    if (!wasMeasured(metric) || seen.has(metric.def.id)) return false;
+    if (view === "side" && metric.def.view !== "side" && !hasSideOverlay(metric.def.id)) return false;
+    seen.add(metric.def.id);
+    // Finite excluded/indicative readings remain inspectable with their flags.
+    return true;
+  });
 }
 
 let active: HTMLElement | null = null;
@@ -140,7 +141,23 @@ export function closeMetricDetail(): void {
 
 function onKey(ev: KeyboardEvent): void {
   if (ev.key === "Escape") {
+    ev.preventDefault();
     closeMetricDetail();
+  } else if (ev.key === "Tab" && active) {
+    const controls = [...active.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], summary, [tabindex='0']")]
+      .filter(control => {
+        const closedDetails = control.closest("details:not([open])");
+        return control.getClientRects().length > 0 && (!closedDetails || closedDetails.querySelector("summary") === control);
+      });
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (ev.shiftKey && document.activeElement === first && last) {
+      ev.preventDefault();
+      last.focus();
+    } else if (!ev.shiftKey && document.activeElement === last && first) {
+      ev.preventDefault();
+      first.focus();
+    }
   } else if (ev.key === "ArrowRight" || ev.key === "ArrowLeft") {
     // Without this each press both steps the deck AND scrolls the report
     // behind the dialog, so the page the reader comes back to has moved.
@@ -209,15 +226,8 @@ function normLine(m: ScoredMetric, sex: Sex): string {
 }
 
 function positionLine(m: ScoredMetric, sex: Sex): string {
-  const group = sex === "male" ? "men" : "women";
-  if (m.conformance >= 0.999) {
-    return `This reading is inside the model's preferred band. Being outside a band would not, by itself, mean something needs changing.`;
-  }
-  // statedPct, like the chip beside it. Math.round put the same number on the
-  // screen twice at two precisions — "Bottom 45%" over "closer to the ideal
-  // than 43% of men" — and the finer of the two is a resolution a ~110-face
-  // reference set cannot support in the first place.
-  return `Modelled standing: above <b>${statedPct(m.percentile)}%</b> of the ${group}'s reference distribution on this measurement, not on overall attractiveness.`;
+  const fit = metricFit(m, sex);
+  return `${fit.label}. This describes agreement with TrueMax's current reference, not overall attractiveness. A reading outside the reference does not, by itself, mean something needs changing.`;
 }
 
 export function overviewHTML(m: ScoredMetric, sex: Sex): string {
@@ -233,6 +243,9 @@ export function overviewHTML(m: ScoredMetric, sex: Sex): string {
   return `
     <p class="mdx-trait">It measures ${metricTrait(m.def.id)}.</p>
     <p class="mdx-norm">${normLine(m, sex)}</p>
+    ${m.def.view === "side" || hasSideOverlay(m.def.id)
+      ? `<p class="mdx-caveat">This profile reference is provisional. Photo angle and point placement affect the reading.</p>`
+      : ""}
     ${constructionCaveat(m.def.id)
       ? `<p class="mdx-caveat">${constructionCaveat(m.def.id)}</p>`
       : ""}
@@ -246,7 +259,7 @@ export function overviewHTML(m: ScoredMetric, sex: Sex): string {
       : ""}`;
 }
 
-function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
+export function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
   // An impossible reading is not a measurement, so it cannot be matched
   // against one. The matcher would happily oblige — its only test is
   // percentile >= 40, and an out-of-bounds value still carries a percentile —
@@ -258,10 +271,16 @@ function celebsHTML(m: ScoredMetric, region: RegionId, sex: Sex): string {
   // is "your X measures like theirs" and nothing vaguer.
   const matches = regionMatches(region, [m], sex);
   if (matches.length) {
-    return matches
+    return `<p class="portrait-disclosure">${PORTRAIT_DISCLOSURE}</p>` + matches
       .map(
-        (c) => `<div class="mdx-celeb"><span class="mdx-ava">${c.name[0]}${celebrityPortraitImage(c.name)}</span>
-          <span class="mdx-celeb-nm">${c.name}<small>${c.metricName}</small></span></div>`,
+        (c) => {
+          const value = CELEBS.find(entry => entry.name === c.name && entry.sex === sex)?.metrics[m.def.id];
+          const reference = Number.isFinite(value) ? fmt({ ...m, value: value! }) : "Not available";
+          return `<div class="mdx-celeb">${celebrityPortraitFigure(c.name)}
+            <span class="mdx-celeb-nm">${c.name}<small>${c.metricName}</small>
+              <span class="mdx-celeb-values">Reference <b>${reference}</b><br>Your reading <b>${fmt(m)}</b></span>
+            </span></div>`;
+        },
       )
       .join("") + celebrityPortraitCredits(matches.map(c => c.name));
   }
@@ -403,18 +422,18 @@ function showAt(next: number): void {
   info.querySelector(".mdx-value")!.textContent = fmt(m);
   const indicative = reliabilityOf(m.def.id) < RELIABLE_MIN;
   const unavailable = !!m.implausible || indicative;
-  const tone = unavailable ? null : scoreTone(m.score);
+  const fit = metricFit(m, opts.sex);
   const stage = active.querySelector<HTMLElement>(".mdx-stage")!;
   stage.classList.remove("tone-hi", "tone-mid", "tone-lo");
-  if (tone) stage.classList.add(`tone-${tone}`);
+  stage.dataset.fit = fit.state;
+  const fitChip = info.querySelector<HTMLElement>(".mdx-fit")!;
+  fitChip.textContent = fit.label;
+  fitChip.dataset.fit = fit.state;
   const score = info.querySelector<HTMLElement>(".mdx-score")!;
-  score.classList.remove("tone-hi", "tone-mid", "tone-lo");
-  if (tone) score.classList.add(`tone-${tone}`);
-  score.textContent = unavailable ? "–" : `${m.score.toFixed(1)} / 10`;
-  info.querySelector(".mdx-grade")!.textContent = m.implausible
-    ? "Re-check this measurement"
-    : indicative ? "Indicative measurement" : metricScoreLabel(m.score, m.def.name);
-  info.querySelector(".mdx-rank")!.textContent = m.implausible ? "re-check" : indicative ? "low repeatability" : rankShort(m.percentile);
+  score.textContent = metricModelScoreLabel(m);
+  const scoreNote = info.querySelector<HTMLElement>(".mdx-modelscore small")!;
+  scoreNote.hidden = score.textContent === "Not scored";
+  scoreNote.textContent = "Used in TrueMax's combined scoring. This is not a percentage of reference fit or a validated population rank.";
   // No population bar for an impossible reading — its marker sits at phi(z) of
   // a value that is not a face, pinned to one end and presented as a position.
   // The side deck already suppresses exactly this on its rows.
@@ -432,6 +451,7 @@ function renderTab(): void {
   const m = opts.metrics[index];
   for (const b of active.querySelectorAll<HTMLButtonElement>(".mdx-tab")) {
     b.classList.toggle("on", b.dataset.tab === tab);
+    b.setAttribute("aria-pressed", String(b.dataset.tab === tab));
   }
   const body = active.querySelector<HTMLElement>(".mdx-tabbody")!;
   body.innerHTML =
@@ -452,7 +472,7 @@ export function openMetricDetail(o: MetricDetailOpts): void {
   wrap.className = "mdx-overlay";
   wrap.innerHTML = `<div class="mdx-card" role="dialog" aria-modal="true" aria-label="Measurement detail">
     <header class="mdx-head">
-      <div><span class="mdx-eyebrow"></span><h3 class="mdx-title"></h3></div>
+      <div><span class="mdx-eyebrow"></span><h3 class="mdx-title" aria-live="polite"></h3></div>
       <span class="mdx-count"></span>
       <button class="mdx-close" aria-label="Close">✕</button>
     </header>
@@ -470,10 +490,9 @@ export function openMetricDetail(o: MetricDetailOpts): void {
         <p class="mdx-decknote"></p>
         <div class="mdx-readout">
           <b class="mdx-value"></b>
-          <span class="mdx-chip mdx-score"></span>
-          <span class="mdx-chip mdx-rank"></span>
+          <span class="mdx-chip mdx-fit"></span>
         </div>
-        <p class="mdx-grade"></p>
+        <p class="mdx-modelscore"><span class="mdx-score"></span><small></small></p>
         <div class="mdx-barhost"></div>
         <nav class="mdx-tabs">
           <button class="mdx-tab" data-tab="overview">Overview</button>

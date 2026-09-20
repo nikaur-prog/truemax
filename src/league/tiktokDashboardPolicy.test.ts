@@ -35,8 +35,8 @@ test("TikTok covers, profile images and the official player can render", () => {
   );
   assert.deepEqual(
     directive(policy, "frame-src"),
-    ["https://www.tiktok.com"],
-    "only the official TikTok player may be framed",
+    ["'self'", "https://www.tiktok.com"],
+    "only same-origin utility frames and the official TikTok player may be framed",
   );
 });
 

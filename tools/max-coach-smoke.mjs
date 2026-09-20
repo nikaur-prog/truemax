@@ -10,7 +10,7 @@ if (!["127.0.0.1", "localhost"].includes(new URL(origin).hostname)) throw new Er
 const artifacts = await mkdtemp(join(tmpdir(), "truemax-coach-review-"));
 const browser = await launchChromium({ headless: true });
 try {
-  for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
     const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
     const errors = [];
     const paidRequests = [];
@@ -68,6 +68,45 @@ try {
     });
     assert.deepEqual(nativeBackground, { paused: true, frames: 0 });
     await page.waitForFunction(() => document.querySelector(".maxchat-face canvas[data-max3d]")?.style.visibility === "visible");
+    await page.locator(".maxchat-composer input").fill("Show a full reply so I can check the speech bubble.");
+    await page.locator(".maxchat-composer button").click();
+    await page.waitForFunction(() => !document.querySelector(".maxchat-composer input")?.disabled);
+    assert.equal(await page.locator(".maxchat-speech .max-speech-bubble").count(), 1, "the local fixture reuses the chat's one bubble");
+    await page.waitForFunction(() => document.querySelector(".maxchat-speech .max-speech-words")?.textContent.endsWith("sent or saved."));
+    const replyLayout = await page.evaluate(() => {
+      const words = document.querySelector(".maxchat-speech .max-speech-words");
+      const close = document.querySelector(".maxchat-close").getBoundingClientRect();
+      const input = document.querySelector(".maxchat-composer input").getBoundingClientRect();
+      return { cropped: words.scrollHeight > words.clientHeight + 1, closeVisible: close.top >= 0 && close.bottom <= innerHeight,
+        composerVisible: input.top >= 0 && input.bottom <= innerHeight };
+    });
+    assert.deepEqual(replyLayout, { cropped: false, closeVisible: true, composerVisible: true });
+    await page.screenshot({ path: join(artifacts, `${viewport.width}-full-reply.png`) });
+    let keyboardLayout = null;
+    if (viewport.width < 500) {
+      const keyboard = { width: viewport.width === 390 ? 375 : viewport.width, height: 330 };
+      await page.setViewportSize(keyboard);
+      await page.waitForFunction(() => document.querySelector(".maxchat")?.classList.contains("maxchat-compact"));
+      await page.locator(".maxchat-composer input").focus();
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      keyboardLayout = await page.evaluate(() => {
+        const close = document.querySelector(".maxchat-close").getBoundingClientRect();
+        const input = document.querySelector(".maxchat-composer input").getBoundingClientRect();
+        const log = document.querySelector(".maxchat-log").getBoundingClientRect();
+        return { height: innerHeight, closeVisible: close.top >= 0 && close.bottom <= innerHeight,
+          composerVisible: input.top >= 0 && input.bottom <= innerHeight,
+          logHeight: log.height, presenceHidden: document.querySelector(".maxchat-presence").getClientRects().length === 0 };
+      });
+      assert.equal(keyboardLayout.closeVisible, true, "Close stays reachable above the phone keyboard");
+      assert.equal(keyboardLayout.composerVisible, true, "the focused composer stays in the visible viewport");
+      assert.equal(keyboardLayout.presenceHidden, true, "decorative presence yields space to the conversation");
+      assert.ok(keyboardLayout.logHeight >= 60, "the compact transcript still has room to scroll");
+      await page.screenshot({ path: join(artifacts, `${keyboard.width}-keyboard.png`) });
+      await page.setViewportSize(viewport);
+      await page.waitForFunction(() => !document.querySelector(".maxchat")?.classList.contains("maxchat-compact"));
+      await page.waitForFunction(() => document.querySelector(".maxchat-face canvas[data-max3d]")?.style.visibility === "visible");
+      assert.equal(await page.locator("canvas[data-max3d]").count(), 1, "closing the keyboard resumes the same renderer");
+    }
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     assert.equal(overflow, false);
     await page.locator(".maxchat-close").click();
@@ -79,7 +118,7 @@ try {
     assert.equal(await page.locator(".maxchat-face .mx-svg").isVisible(), true);
     assert.deepEqual(paidRequests, []);
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ viewport, oneRenderer: true, quietFrames, nativeBackground, reducedMotionFallback: true, overflow, paidRequests, errors }));
+    console.log(JSON.stringify({ viewport, oneRenderer: true, quietFrames, nativeBackground, replyLayout, keyboardLayout, reducedMotionFallback: true, overflow, paidRequests, errors }));
     await page.close();
   }
 } finally { await browser.close(); }

@@ -11,6 +11,7 @@ export interface ConversationQualityCase {
   confirmedNote?: MaxContext["planNoteUpdate"];
   maxWords: number;
   maxQuestions?: number;
+  allowGreeting?: boolean;
   reviewCriteria: string[];
   flagPatterns?: Array<{ reason: string; pattern: RegExp }>;
 }
@@ -26,6 +27,24 @@ const assistant = (content: string): ChatTurn => ({ role: "assistant", content }
 const saveClaim = { reason: "Claims a save or routine start without confirmation", pattern: /\b(?:I(?:'ve| have)?|we(?:'ve| have)?) (?:saved|added|started|scheduled)|\b(?:your|the) (?:plan|routine) is (?:saved|running|started)\b/i };
 
 export const CONVERSATION_QUALITY_CASES: readonly ConversationQualityCase[] = [
+  {
+    id: "casual_greeting", description: "A first hello gets a natural short response, not an unsolicited analysis", context: { scans: 0 },
+    messages: [user("Hey Max, how are you doing? Keep it casual and brief.")], maxWords: 40, maxQuestions: 1, allowGreeting: true,
+    reviewCriteria: ["Reply naturally and briefly without pretending to have human activities or feelings.", "Do not invent a name, completed routine, product or scan, and do not launch into unrequested coaching."],
+  },
+  {
+    id: "missing_product_checkin", description: "A check-in must not manufacture a product, routine day or progress", context: { scans: 2 },
+    messages: [user("How is that product going for me? What day am I on?")], maxWords: 75, maxQuestions: 1,
+    reviewCriteria: ["Say the product and routine start are not present in this context, without claiming no records exist anywhere.", "Ask one focused clarification instead of inventing a brand, elapsed day or physical improvement."],
+    flagPatterns: [{ reason: "Invents a routine day", pattern: /\b(?:you(?:'re| are) (?:on |at )?|it's |it is )day \d+/i }],
+  },
+  {
+    id: "latest_goal_correction", description: "The user's correction beats an older saved note without restarting the introduction", context: { ...scan, activePlan: ["Bedtime routine: active"] },
+    messages: [user("I want to focus on sleep."), assistant("Nikau, let's get to work on your sleep routine. Start by setting a regular bedtime."), user("Actually, I stopped that. I want one simple hair-styling step, not sleep advice.")],
+    maxWords: 65, maxQuestions: 1,
+    reviewCriteria: ["Answer the new hair-styling request, respecting that they stopped the old routine.", "Do not restart with their name or repeat the introduction, claim a saved update, or tell them to keep following the sleep note."],
+    flagPatterns: [saveClaim, { reason: "Restarts with repetitive personalization", pattern: /^Nikau\b/i }],
+  },
   {
     id: "measurement_direct", description: "Answer a specific measurement without rerating the face", context: scan,
     messages: [user("What does my 126-degree gonial angle mean?")], maxWords: 90, maxQuestions: 0,

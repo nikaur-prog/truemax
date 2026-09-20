@@ -64,3 +64,11 @@ test("empty and oversized captured replies are surfaced for review", () => {
   assert.deepEqual(reviewConversationReply(scenario("one_step_time_constraint"), " ").mechanicalFlags, ["Empty response"]);
   assert.ok(reviewConversationReply(scenario("one_step_time_constraint"), "word ".repeat(46)).mechanicalFlags.some((flag) => flag.includes("45-word")));
 });
+
+test("a requested greeting is welcome while repeated introductions and invented context are flagged", () => {
+  assert.deepEqual(reviewConversationReply(scenario("casual_greeting"), "Hey! What would you like a hand with?").mechanicalFlags, []);
+  const repeated = reviewConversationReply(scenario("latest_goal_correction"), "Nikau, let's get to work on your sleep routine. Keep following it.");
+  assert.ok(repeated.mechanicalFlags.includes("Repeats the previous reply's opening"));
+  assert.ok(repeated.mechanicalFlags.includes("Restarts with repetitive personalization"));
+  assert.ok(reviewConversationReply(scenario("missing_product_checkin"), "You're on day 12 and improving.").mechanicalFlags.includes("Invents a routine day"));
+});

@@ -3,6 +3,10 @@ import { METRICS } from "./metrics.js";
 import { SIDE_METRICS } from "./sideMetrics.js";
 import { scopedStorageKey } from "./scanScope.js";
 import type { CalibrationDiagnostics } from "./calibrationDiagnostics.js";
+import { isCalibrationRatingTarget } from "./calibrationComparison.js";
+import type { CalibrationCaptureScores, CalibrationRatingTarget } from "./calibrationComparison.js";
+import { calibrationCaptureWarnings, CalibrationCaptureReviewRequired } from "./calibrationCaptureGuard.js";
+import type { CalibrationFileReference } from "./calibrationCaptureGuard.js";
 
 // ---------------------------------------------------------------------------
 // Collecting rated faces, so the corpus can grow without being assembled by
@@ -121,6 +125,10 @@ export interface RatedFace {
   rating: number | null;
   /** What the engine said at capture time. Kept for the disagreement column. */
   scored: number;
+  /** Explicit rating scope. Older rows are unknown, never assumed front-only. */
+  ratingTarget?: CalibrationRatingTarget;
+  /** Each view's score at capture time; `scored` retains its legacy primary meaning. */
+  captureScores?: CalibrationCaptureScores;
   /**
    * Where `rating` came from.
    *
@@ -158,6 +166,8 @@ export interface RatedFace {
   suspect?: number;
   /** Raw capture evidence for review; never included in the fitting corpus. */
   diagnostics?: CalibrationDiagnostics;
+  /** Explicitly reviewed capture exceptions; excluded from automatic fitting. No photo or filename. */
+  captureReview?: { schemaVersion: 1; acknowledgedWarnings: string[] };
   measurements: Record<string, number>;
 }
 
@@ -286,13 +296,16 @@ export function addRatedFace(
   // The row's audit trail: the thumbnail that says which face this is, and
   // the implausible-reading count that says whether to trust it. Optional as
   // a pair because both come from the same capture context.
-  extras?: { thumb?: string; suspect?: number; diagnostics?: CalibrationDiagnostics; referenceId?: string },
+  extras?: { thumb?: string; suspect?: number; diagnostics?: CalibrationDiagnostics; referenceId?: string; ratingTarget?: CalibrationRatingTarget; captureScores?: CalibrationCaptureScores;
+    fileReferences?: { front?: CalibrationFileReference; side?: CalibrationFileReference }; acknowledgedCaptureWarnings?: string[] },
 ): RatedFace[] {
   const referenceId = calibrationReferenceId(extras?.referenceId);
   const snapshot = readForUpdate();
   const faces = snapshot.faces;
-  if (referenceId && faces.some((face) => face.sex === report.sex && face.referenceId === referenceId)) {
-    throw new Error(`Reference ${referenceId} is already saved for this reference group. Review that row first, or use a separate ID such as ${referenceId}-retake for another capture.`);
+  const warnings = calibrationCaptureWarnings({ sex: report.sex, referenceId, diagnostics: extras?.diagnostics, fileReferences: extras?.fileReferences }, faces);
+  const acknowledged = new Set(extras?.acknowledgedCaptureWarnings ?? []);
+  if (warnings.length && (acknowledged.size !== warnings.length || warnings.some(({ code }) => !acknowledged.has(code)))) {
+    throw new CalibrationCaptureReviewRequired(warnings);
   }
   const sexPrefix = report.sex === "male" ? "m" : "w";
   // One past the HIGHEST id in use, not one past the count.
@@ -319,11 +332,14 @@ export function addRatedFace(
     sex: report.sex,
     rating,
     scored: report.overall,
+    ...(isCalibrationRatingTarget(extras?.ratingTarget) ? { ratingTarget: extras.ratingTarget } : {}),
+    ...(extras?.captureScores ? { captureScores: { ...extras.captureScores } } : {}),
     ratedBy,
     ...(label ? { label } : {}),
     ...(extras?.thumb ? { thumb: extras.thumb } : {}),
     ...(extras?.suspect ? { suspect: extras.suspect } : {}),
     ...(extras?.diagnostics ? { diagnostics: structuredClone(extras.diagnostics) } : {}),
+    ...(warnings.length ? { captureReview: { schemaVersion: 1 as const, acknowledgedWarnings: warnings.map(({ code }) => code) } } : {}),
     measurements: side ? measurementsOf(report, side) : measurementsOf(report),
   });
   save(faces, snapshot);
@@ -356,9 +372,12 @@ export function reviseRating(id: string, rating: number, keepsProvenance: boolea
     f.id === id ? {
       ...f,
       rating,
-      // Correcting a typo cannot turn a borrowed or already revised score into
-      // an independent human label. Unknown legacy provenance stays unknown.
-      ratedBy: f.ratedBy === "external" ? "external" : keepsProvenance ? f.ratedBy : "revised",
+      // A first rating added after the result was revealed cannot be a typo
+      // correction: there was no blind number to preserve. Keep it for review,
+      // but never promote it into the fitting corpus. External stays external;
+      // ordinary typo corrections retain their existing provenance.
+      ratedBy: f.ratedBy === "external" ? "external"
+        : f.rating === null || !keepsProvenance ? "revised" : f.ratedBy,
     } as RatedFace : f,
   );
   save(faces, snapshot);
@@ -408,7 +427,12 @@ export function splitByProvenance(faces: RatedFace[]): { own: RatedFace[]; withh
   // borrowed number to worry about — but it is equally unfittable, because
   // there is nothing to fit TO. Both land outside `own` for the same practical
   // reason and the set list tells them apart in its own copy.
-  const fittable = (f: RatedFace) => f.ratedBy === "self" && f.rating !== null;
+  // The existing corpus fitter predicts a FRONT score. A combined/side/unknown
+  // target must not silently become a front label just because front metrics exist.
+  const fittable = (f: RatedFace) => f.ratedBy === "self" && f.rating !== null
+    && f.ratingTarget === "front"
+    && !f.captureReview?.acknowledgedWarnings?.length
+    && METRICS.some((metric) => Number.isFinite(f.measurements[metric.id]));
   return {
     own: faces.filter(fittable),
     withheld: faces.filter((f) => !fittable(f)),
@@ -462,8 +486,11 @@ export function calibrationDiagnosticsJSON(faces: RatedFace[]): string {
       rating: face.rating,
       ratingSource: face.ratedBy ?? "unknown",
       scored: face.scored,
+      ratingTarget: face.ratingTarget ?? "unknown",
+      captureScores: face.captureScores ?? null,
       measurements: face.measurements,
       diagnostics: face.diagnostics ?? null,
+      ...(face.captureReview ? { captureReview: face.captureReview } : {}),
     })),
   }, null, 2)}\n`;
 }

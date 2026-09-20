@@ -11,6 +11,13 @@ export const MAX_DAILY_MESSAGES = 30;
 // count is noise: nobody needs to be told they have twenty-two messages.
 export const ALLOWANCE_WARN_AT = 5;
 
+/** Missing allowance metadata is unknown, never a zero-message balance. */
+export function parseMaxRemaining(value: string | null): number | null {
+  if (value === null || !/^\d+$/.test(value.trim())) return null;
+  const remaining = Number(value);
+  return Number.isSafeInteger(remaining) ? remaining : null;
+}
+
 // When the server's day rolls over, as an ISO stamp: the next UTC midnight
 // after `now`. Mirrors claim_max_chat_turn, which keys usage on the UTC date.
 export function nextUtcMidnight(now = Date.now()): string {

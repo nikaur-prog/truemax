@@ -112,3 +112,26 @@ test("Calibrate explains collection is not automatic training and keeps ratings 
   assert.match(save, /rating !== null && external.checked \? "external" : "self"/);
   assert.match(save, /if \(!num\.value\.trim\(\)\) \{\s+store\(null\);/);
 });
+
+test("calibration comparisons carry explicit target and view scores instead of front-only reassurance", () => {
+  const rating = quick.slice(quick.indexOf("function renderRatingStep"), quick.indexOf("function renderVerdictStep"));
+  const verdict = quick.slice(quick.indexOf("function renderVerdictStep"), quick.indexOf("function gapOf"));
+  assert.match(rating, /id="q-cal-target"/);
+  assert.match(rating, /ratingTarget: verdict\.ratingTarget/);
+  assert.match(rating, /captureScores: verdict\.captureScores/);
+  assert.match(rating, /external\.checked \? "external-overall" : defaultTarget/);
+  assert.match(verdict, /calibrationScoreComparison\(/);
+  assert.match(verdict, /Numerical difference only, not a validation result/);
+  assert.match(verdict, /another app's total may score different factors/);
+  assert.doesNotMatch(verdict, /agrees with you|is too generous|is too harsh|r\.overall - rating/);
+});
+
+test("an unrated saved capture offers review-only rating entry, not a typo correction", () => {
+  const edit = quick.slice(quick.indexOf("function renderRatingEdit"), quick.indexOf("async function wireSaveFolder"));
+  assert.match(edit, /const unrated = face\.rating === null/);
+  assert.match(edit, /unrated \? "Add a rating for review"/);
+  assert.match(edit, /unrated \? "" : `<button[^`]*id="q-edit-typo"/);
+  assert.match(edit, /unrated \? "Save rating for review" : "I changed my mind"/);
+  assert.match(edit, /if \(typo\) typo\.onclick = \(\) => commit\(true\)/);
+  assert.match(edit, /getElementById\("q-edit-mind"\)!\.onclick = \(\) => commit\(false\)/);
+});

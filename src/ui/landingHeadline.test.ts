@@ -78,6 +78,14 @@ test("visit 0 opens on the clearest product description", () => {
   assert.equal(text(pickHeadline(ctx())), "Your face score, measurement by measurement.");
 });
 
+test("every public headline retains the product topic after client rendering", () => {
+  for (let visit = 0; visit < 12; visit++) {
+    const headline = text(pickHeadline(ctx({ visit })));
+    assert.match(headline, /face (score|analysis)/i);
+    assert.doesNotMatch(headline, /without.*guesswork|guaranteed|perfect|validated/i);
+  }
+});
+
 test("a signed-in name appears in the headline", () => {
   for (const c of everyContext().filter((c) => c.name === "Sam")) {
     assert.match(text(pickHeadline(c)), /Sam/, "signed-in headline dropped the name");

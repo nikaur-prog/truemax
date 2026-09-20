@@ -59,6 +59,7 @@ import type { ScanPerformanceAttempt } from "../engine/scanPerformance.js";
 import { flipSideReviewPoints, recoverSideSeed, sideImageSize } from "../engine/sideCaptureRecovery.js";
 import type { SideCaptureDiagnostics, SideReviewMode } from "../engine/sideCaptureRecovery.js";
 import { runSideCloudAttempt } from "../engine/sideCloudAttempt.js";
+import type { SideCloudFailureReason } from "../engine/sideCloudFailure.js";
 import { fingerprintCalibrationImage } from "../engine/calibrationImageSource.js";
 import type { CalibrationImageSource } from "../engine/calibrationImageSource.js";
 
@@ -961,6 +962,11 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
   const finishCloud = ctx.performance?.start("side_cloud");
   const cloudAttempt = await cloudPlacementFor(snapshot, localResult, signal, ctx.reviewMode);
   const cloudResult = cloudAttempt.placement;
+  if (recovered.diagnostics) {
+    recovered.diagnostics.cloudAttempt = cloudAttempt.status === "unavailable"
+      ? { status: cloudAttempt.status, reason: cloudAttempt.reason }
+      : { status: cloudAttempt.status };
+  }
   if (cloudAttempt.status === "unavailable") {
     recovered.diagnostics?.warnings.push("cloud-unavailable");
   }
@@ -1025,17 +1031,20 @@ async function loadCanvas(src: HTMLCanvasElement, ctx: SideCtx, signal = sideAtt
 }
 
 async function cloudPlacementFor(canvas: HTMLCanvasElement, seed: SidePlacementSeed, signal: AbortSignal, mode: SideReviewMode) {
+  let failureReason: SideCloudFailureReason | undefined;
   return runSideCloudAttempt({
     enabled: readSidePlacementChoice() === "cloud",
     mode,
     signal,
     getAccessToken: () => currentAccessToken(),
+    failureReason: () => failureReason,
     request: (token, requestSignal) => {
       const directedSeed = withPointDerivedSideDirection(seed);
       return requestCloudSidePlacement(canvas, token, {
         seed: directedSeed.points,
         faceDir: directedSeed.faceDir,
         signal: requestSignal,
+        onFailure: (reason) => { failureReason = reason; },
       });
     },
   });
@@ -1506,11 +1515,15 @@ function mountVerify(
       <button class="btn gho" id="side-wrong" type="button">Points look wrong</button>
       </div>`;
     if (calibrationReview) {
+      const facing = document.createElement("fieldset");
+      facing.className = "side-direction-choice";
+      facing.innerHTML = `<legend>Which way does the nose face?</legend><p id="side-direction-help">Use left or right as you see it in this photo, not the person's left or right. If the highlighted choice matches, leave it selected. Changing it flips the starting points, not the photo; check the points again afterwards.</p>`;
       const direction = document.createElement("div");
       direction.className = "side-review-tools";
       direction.setAttribute("role", "group");
-      direction.setAttribute("aria-label", "Which way does the face point in this photo?");
-      direction.innerHTML = `<button class="btn gho" type="button" data-side-direction="-1">Face points left</button><button class="btn gho" type="button" data-side-direction="1">Face points right</button>`;
+      direction.setAttribute("aria-label", "Nose direction in the displayed photo");
+      direction.setAttribute("aria-describedby", "side-direction-help");
+      direction.innerHTML = `<button class="btn gho" type="button" data-side-direction="-1"><span aria-hidden="true">←</span> Nose faces left</button><button class="btn gho" type="button" data-side-direction="1">Nose faces right <span aria-hidden="true">→</span></button>`;
       paintCalibrationDirection = () => {
         const actual = faceDirFromPoints(verifier!.points);
         verifier!.faceDir = actual;
@@ -1531,7 +1544,8 @@ function mountVerify(
         paintCalibrationDirection();
       });
       paintCalibrationDirection();
-      e.actions.appendChild(direction);
+      facing.appendChild(direction);
+      e.actions.appendChild(facing);
       const confirmation = document.createElement("label");
       confirmation.className = "side-feedback-confirmation";
       confirmation.innerHTML = `<input type="checkbox" id="side-calibration-reviewed" /><span>I checked all thirteen points and the facing direction against this photo.</span>`;

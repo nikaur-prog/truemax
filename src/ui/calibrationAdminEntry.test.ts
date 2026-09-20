@@ -30,7 +30,7 @@ test("calibration records explicit anonymous reference IDs separately from priva
   const form = quick.slice(quick.indexOf("function renderRatingStep("), quick.indexOf("function renderVerdictStep("));
   assert.match(form, /id="q-cal-reference"/);
   assert.match(form, /referenceId = calibrationReferenceId\(reference\.value\)/);
-  assert.match(form, /\{\s*referenceId,\s*thumb:/);
+  assert.match(form, /\{\s*referenceId,\s*ratingTarget: verdict\.ratingTarget,\s*captureScores: verdict\.captureScores,\s*thumb:/);
   assert.doesNotMatch(form, /calibrationReferenceId\(label\.value\)/);
 });
 
@@ -57,4 +57,18 @@ test("saved-set display and both exports fail visibly on unreadable storage", ()
   assert.match(view, /Do not clear your browser data/);
   assert.match(view, /The diagnostics could not be exported/);
   assert.match(view, /The corpus could not be read/);
+});
+
+test("pilot filename hints are per-capture and reviewed exceptions need explicit acknowledgement", () => {
+  const reset = quick.slice(quick.indexOf("function clearPending("), quick.indexOf("async function changeCalibrationReference("));
+  assert.match(reset, /pendingFrontFileReference = undefined/);
+  assert.match(reset, /pendingSideFileReference = undefined/);
+  assert.match(quick, /pendingFrontFileReference = sourceFile \? calibrationFileReference\(sourceFile\.name\) : undefined/);
+  assert.match(quick, /if \(sex && !signal\.aborted\) acceptedFileReference = calibrationFileReference\(file\.name\)/);
+  const form = quick.slice(quick.indexOf("function renderRatingStep("), quick.indexOf("function renderVerdictStep("));
+  assert.match(form, /reference\.value = suggestedCalibrationReference/);
+  assert.match(form, /reference\.oninput = \(\) => \{\s*captureConfirm\.checked = false/);
+  assert.match(form, /acknowledgedCaptureWarnings: captureConfirm\.checked && !captureWarning\.classList\.contains\("hidden"\) \? displayedWarningCodes : \[\]/);
+  assert.match(form, /error instanceof CalibrationCaptureReviewRequired/);
+  assert.match(form, /item\.textContent = message/);
 });

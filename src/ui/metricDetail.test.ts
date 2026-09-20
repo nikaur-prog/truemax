@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { constructionCaveat, metricScoreLabel, overviewHTML, stageViewFor, stepIndex } from "./metricDetail.js";
+import { celebsHTML, constructionCaveat, measurementDeck, overviewHTML, stageViewFor, stepIndex } from "./metricDetail.js";
 import { sideMeasurementBounds } from "./sideMeasureOverlay.js";
 import { SIDE_METRICS, computeSideMetrics, faceDirFromPoints } from "../engine/sideMetrics.js";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import type { ScoredMetric } from "../engine/types.js";
 import { METRICS } from "../engine/metrics.js";
+import { CELEBS, regionMatches } from "../engine/celebs.js";
+import { scoreFrontMeasurements } from "../engine/scoring.js";
 
 // ---------------------------------------------------------------------------
 // The detail view's decisions, minus the DOM.
@@ -39,6 +41,45 @@ test("the deck steps without wrapping", () => {
   assert.equal(stepIndex(4, 1, 5), 4);
   assert.equal(stepIndex(2, 1, 5), 3);
   assert.equal(stepIndex(2, -1, 5), 1);
+  assert.equal(stepIndex(0, 1, 0), 0);
+});
+
+test("side navigation crosses region boundaries without admitting front measurements", () => {
+  const jaw = asMetric("gonialAngle", "jaw");
+  const nose = asMetric("nasolabialAngle", "nose");
+  const front = asMetric("canthalTilt", "eyes");
+  const invalid = { ...nose, def: { ...nose.def, id: "missing" }, value: Number.NaN };
+  const flagged = { ...asMetric("chinRecession", "chin"), implausible: true };
+  const regions = [{ metrics: [jaw, front] }, { metrics: [nose, invalid, flagged, jaw] }];
+  assert.deepEqual(measurementDeck(regions, "side"), [jaw, nose, flagged]);
+  assert.deepEqual(measurementDeck(regions), [jaw, front, nose, flagged]);
+  assert.equal(measurementDeck(regions, "side")[stepIndex(0, 1, 3)].def.region, "nose");
+});
+
+test("comparison portraits and values belong to the matched celebrity and current measurement", () => {
+  const celeb = CELEBS.find(entry => entry.name === "Henry Cavill")!;
+  const report = scoreFrontMeasurements(celeb.metrics, celeb.sex);
+  const metric = report.metrics.find(m => m.def.id === "canthalTilt")!;
+  const matches = regionMatches(metric.def.region, [metric], celeb.sex);
+  assert.ok(matches.length);
+  const html = celebsHTML(metric, metric.def.region, celeb.sex);
+  for (const match of matches) {
+    const reference = CELEBS.find(entry => entry.name === match.name)!;
+    assert.ok(html.includes(match.name));
+    assert.ok(html.includes(reference.metrics[metric.def.id].toFixed(metric.def.decimals)));
+  }
+  assert.match(html, /Reference portrait of/);
+  assert.match(html, /Your reading/);
+  assert.match(html, /Photo credits and sources/);
+  assert.match(html, /may differ from the photos measured/);
+  assert.doesNotMatch(html, /mdx-photo|canvas|data:user/);
+});
+
+test("an excluded or unsupported side reading never invents a celebrity match", () => {
+  const def = SIDE_METRICS.find(metric => metric.id === "gonialAngle")!;
+  const metric = { def, value: 125, percentile: 80 } as ScoredMetric;
+  assert.doesNotMatch(celebsHTML({ ...metric, implausible: true }, "jaw", "male"), /data-celebrity-portrait/);
+  assert.doesNotMatch(celebsHTML(metric, "jaw", "male"), /data-celebrity-portrait/);
 });
 
 const PROFILE: SidePoints = {
@@ -85,15 +126,6 @@ test("the H angle's frame holds nasion, lip and chin", () => {
 test("a metric with no recipe returns no bounds rather than a wrong box", () => {
   const b = sideMeasurementBounds(asMetric("noSuchMetric"), PROFILE, 240, 360);
   assert.equal(b, undefined);
-});
-
-test("measurement detail grades climb with the score", () => {
-  assert.equal(metricScoreLabel(8.1, "Eyebrow tilt"), "High model score for eyebrow tilt");
-  assert.equal(metricScoreLabel(6.4, "Jaw angle"), "Above-reference score for jaw angle");
-  assert.equal(metricScoreLabel(5.0, "Midface ratio"), "Mid-range model score for midface ratio");
-  assert.equal(metricScoreLabel(3.8, "Chin projection"), "Below-reference score for chin projection");
-  assert.equal(metricScoreLabel(2.7, "Lower lip"), "Below-reference score for lower lip");
-  assert.equal(metricScoreLabel(Number.NaN, "Missing"), "Not scored");
 });
 
 test("indicative detail does not pair a caution with a confident trait or percentile", () => {

@@ -2,6 +2,7 @@ import { SIDE_POINTS } from "./sideMetrics.js";
 import type { SidePoints } from "./sideMetrics.js";
 import { cloneSidePoints } from "./sideFeedbackPayload.js";
 import type { SideSeedMethod } from "./sideFeedbackPayload.js";
+import type { SideCloudFailureReason } from "./sideCloudFailure.js";
 
 export type SideReviewMode = "calibration" | undefined;
 export type SideCaptureWarning = "detector-unavailable" | "automatic-placement-failed" | "automatic-placement-timeout" | "cloud-unavailable";
@@ -22,6 +23,8 @@ export interface SideCaptureDiagnostics {
   localConfidence: number | null;
   templateFallback: boolean;
   warnings: SideCaptureWarning[];
+  /** Added prospectively. Missing on historic captures, never reconstructed. */
+  cloudAttempt?: { status: "success" | "disabled" | "cancelled" | "unavailable"; reason?: SideCloudFailureReason };
   /** Operator-confirmed out-of-range readings remain excluded by the engine. */
   reviewedRangeWarnings?: string[];
 }

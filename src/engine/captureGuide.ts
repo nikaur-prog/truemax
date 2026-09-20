@@ -2,6 +2,8 @@ import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { assessQuality } from "./quality.js";
 import { estimateGaze } from "./gaze.js";
 import type { Gaze } from "./gaze.js";
+import { faceBounds, frontSourceFraming } from "./frontFraming.js";
+import type { SourceFrame } from "./frontFraming.js";
 
 // ---------------------------------------------------------------------------
 // Live capture guidance. The scan is only as good as the photo, so instead of
@@ -44,31 +46,10 @@ export interface FrameCheck {
   };
 }
 
-// Face width as a fraction of the VISIBLE frame width. Exported because the
-// capture guide draws its silhouette at the midpoint of this band — the target
-// someone lines up against and the gate that judges them have to be the same
-// number, or fitting the outline and being told "move closer" happen at once.
-export const TARGET_MIN = 0.3;
-export const TARGET_MAX = 0.62;
-
-// How much of the camera frame the preview actually shows.
-//
-// The preview is `object-fit: cover`, so a camera whose aspect ratio differs
-// from the frame's gets centre-cropped — and on a 16:9 webcam in a square frame
-// that throws away nearly half the width. Landmarks arrive normalized to the
-// FULL video, so measuring face width against that was measuring against pixels
-// the user cannot see: a face filling 90% of the visible frame reads as 0.25 of
-// the video and gets told "move closer", forever.
-//
-// Everything positional below is therefore divided through by these, which
-// converts video-normalized coordinates into visible-frame ones. Cover crops
-// symmetrically about the centre, so the centre maps to the centre and only the
-// scale changes.
-export interface Viewport {
-  visW: number; // 0..1 — fraction of video width on screen
-  visH: number;
-}
-const FULL_VIEW: Viewport = { visW: 1, visH: 1 };
+// Check the source, not a percentage of CSS preview width. A 30–62% width band
+// sent phone users backwards and laptop users forwards for the same face.
+// Preview fitting is display-only and must never manufacture capture readiness.
+const DEFAULT_SOURCE: SourceFrame = { width: 640, height: 480 };
 // How far off-axis a capture may be.
 //
 // These were 8 / 10 / 5, and that was the wrong standard by a wide margin: it
@@ -477,7 +458,7 @@ export function checkSideFrame(
 export function checkFrame(
   result: FaceLandmarkerResult | null,
   stats: FrameStats,
-  view: Viewport = FULL_VIEW,
+  source: SourceFrame = DEFAULT_SOURCE,
   // Last verdict from the glasses measure, which runs on its own slower clock
   // because it costs a canvas readback. "advise" only says so; "block" holds
   // the shutter, and the UI must offer a way past it — see occlusion.ts.
@@ -509,29 +490,19 @@ export function checkFrame(
   }
   gates.face = true;
 
-  const q = assessQuality(result);
+  const q = assessQuality(result, source);
   const pose = { yaw: q.yawDeg, pitch: q.pitchDeg, roll: q.rollDeg };
   const lm = result.faceLandmarks[0];
   const gaze = estimateGaze(lm);
-  let minX = 1;
-  let maxX = 0;
-  let minY = 1;
-  let maxY = 0;
-  for (const p of lm) {
-    minX = Math.min(minX, p.x);
-    maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y);
-    maxY = Math.max(maxY, p.y);
+  const box = faceBounds(lm);
+  if (!q.faceFound || !box || box.w <= 0 || box.h <= 0) {
+    gates.face = false;
+    return { ready: false, hint: "Center your face in the frame", detail: "Waiting for clear facial points…", status: "red", progress: 0, gaze: null, pose, gates };
   }
-  // Converted out of video-normalized space and into visible-frame space, so
-  // every number below means what someone looking at the preview would say it
-  // means.
-  const w = (maxX - minX) / view.visW;
-  const cxOff = ((minX + maxX) / 2 - 0.5) / view.visW;
-  const cyOff = ((minY + maxY) / 2 - 0.5) / view.visH;
-
-  gates.distance = w >= TARGET_MIN && w <= TARGET_MAX;
-  gates.centered = Math.abs(cxOff) < 0.1 && Math.abs(cyOff) < 0.12;
+  const framing = frontSourceFraming(box, source);
+  const { cxOff, cyOff } = framing;
+  gates.distance = framing.distance;
+  gates.centered = framing.centered;
   gates.level = Math.abs(q.pitchDeg) <= FRONT_PITCH_OK;
   gates.straight = Math.abs(q.yawDeg) <= FRONT_YAW_OK && Math.abs(q.rollDeg) <= FRONT_ROLL_OK;
   gates.light = lightOk(stats);
@@ -551,10 +522,10 @@ export function checkFrame(
     if (over > 0) problems.push({ over, hint, detail });
   };
 
-  add((TARGET_MIN - w) / TARGET_MIN, "Move closer", "Your face should fill most of the frame");
-  add((w - TARGET_MAX) / TARGET_MAX, "Move back a little", "You're too close to the lens");
-  add((Math.abs(cxOff) - 0.1) / 0.1, cxOff > 0 ? "Move left" : "Move right", "Center your face");
-  add((Math.abs(cyOff) - 0.12) / 0.12, cyOff > 0 ? "Move up" : "Move down", "Center your face");
+  add(framing.detailDeficit, "Bring the camera a little closer", "The original camera image needs more facial detail");
+  add(framing.clipped ? 1 : 0, "Keep your whole face in view", "Leave a little space around your forehead, cheeks and chin");
+  add((Math.abs(cxOff) - 0.18) / 0.18, cxOff > 0 ? "Move left" : "Move right", "Keep your face near the middle of the camera view");
+  add((Math.abs(cyOff) - 0.2) / 0.2, cyOff > 0 ? "Move up" : "Move down", "Keep your face near the middle of the camera view");
   add((FACE_HIGHLIGHT_MIN - stats.lumaHigh) / FACE_HIGHLIGHT_MIN, "Too dark", "Face a window or turn a light on");
   add((stats.luma - PHOTO_BRIGHT) / PHOTO_BRIGHT, "Too bright", "Move out of direct light");
   add((-q.pitchDeg - FRONT_PITCH_OK) / FRONT_PITCH_OK, "Lower the camera", "It's above your eye line, looking down");

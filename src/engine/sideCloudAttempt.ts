@@ -1,9 +1,11 @@
 import { SIDE_PLACEMENT_DEFAULT_TIMEOUT_MS } from "./sidePlacementRequest.js";
 import type { SideReviewMode } from "./sideCaptureRecovery.js";
+import type { SideCloudFailureReason } from "./sideCloudFailure.js";
 
 export type SideCloudAttempt<T> =
   | { status: "success"; placement: T }
-  | { status: "disabled" | "unavailable" | "cancelled"; placement: null };
+  | { status: "disabled" | "cancelled"; placement: null }
+  | { status: "unavailable"; placement: null; reason: SideCloudFailureReason };
 
 /** An admin deadline covers authentication and placement together. */
 export async function runSideCloudAttempt<T>(input: {
@@ -12,6 +14,7 @@ export async function runSideCloudAttempt<T>(input: {
   signal: AbortSignal;
   getAccessToken: () => Promise<string | null>;
   request: (token: string, signal: AbortSignal) => Promise<T | null>;
+  failureReason?: () => SideCloudFailureReason | undefined;
   timeoutMs?: number;
 }): Promise<SideCloudAttempt<T>> {
   // A device-only choice must not wait for a session refresh or auth lock.
@@ -20,7 +23,9 @@ export async function runSideCloudAttempt<T>(input: {
 
   const calibration = input.mode === "calibration";
   const local = new AbortController();
-  const unavailable = (): SideCloudAttempt<T> => ({ status: "unavailable", placement: null });
+  let phase: "auth" | "request" = "auth";
+  let timeoutReason: SideCloudFailureReason | undefined;
+  const unavailable = (reason: SideCloudFailureReason = timeoutReason ?? input.failureReason?.() ?? "request-unavailable"): SideCloudAttempt<T> => ({ status: "unavailable", placement: null, reason });
   const interrupted = (): SideCloudAttempt<T> => input.signal.aborted
     ? { status: "cancelled", placement: null }
     : unavailable();
@@ -32,15 +37,18 @@ export async function runSideCloudAttempt<T>(input: {
   };
   input.signal.addEventListener("abort", cancel, { once: true });
   const timer = calibration ? setTimeout(() => {
+    timeoutReason = phase === "auth" ? "auth-timeout" : "timeout";
     local.abort();
     resolveStopped(unavailable());
   }, input.timeoutMs ?? SIDE_PLACEMENT_DEFAULT_TIMEOUT_MS) : undefined;
 
   const work = async (): Promise<SideCloudAttempt<T>> => {
-    const token = await input.getAccessToken().catch(() => null);
+    let authFailed = false;
+    const token = await input.getAccessToken().catch(() => { authFailed = true; return null; });
     // A late token must not upload a photo after timeout, retake or cancellation.
     if (local.signal.aborted) return interrupted();
-    if (!token) return unavailable();
+    if (!token) return unavailable(authFailed ? "auth-unavailable" : "auth-required");
+    phase = "request";
     const placement = await input.request(token, local.signal);
     if (local.signal.aborted) return interrupted();
     return placement === null ? unavailable() : { status: "success", placement };

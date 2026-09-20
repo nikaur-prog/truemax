@@ -40,8 +40,8 @@ export interface HeadlineContext {
 // measurement tool into a universal verdict about attractiveness.
 const ANONYMOUS: Headline[] = [
   { lead: "Your face score, ", em: "measurement by measurement", tail: "." },
-  { lead: "See what works, ", em: "and what can move", tail: "." },
-  { lead: "Understand your face, ", em: "without the guesswork", tail: "." },
+  { lead: "Your face analysis, ", em: "with the working shown", tail: "." },
+  { lead: "Understand your face score, ", em: "one feature at a time", tail: "." },
 ];
 
 // A week is the shortest gap over which this instrument can tell a change from

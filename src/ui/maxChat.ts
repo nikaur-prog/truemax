@@ -1,6 +1,10 @@
 import { currentAccessToken, onAuthChange } from "../engine/auth.js";
 import { maxCharacterMarkup, reactMax } from "./maxCharacter.js";
 import { mountMaxAvatar3D, type MaxAvatar3DHandle } from "./maxAvatar3d.js";
+import { mountMaxSpeechBubble, type MaxSpeechBubbleHandle } from "./maxSpeechBubble.js";
+import { maxTextMouthLevel } from "./maxSpeechText.js";
+import { bindMaxChatViewport } from "./maxChatViewport.js";
+import "./maxChatPresence.css";
 import { OPENING_SUGGESTIONS, suggestFollowUps } from "./maxSuggestions.js";
 import type { MaxChatContext } from "../engine/maxContext.js";
 import { buildCoachingSnapshot } from "../engine/maxContext.js";
@@ -8,10 +12,11 @@ import { loadProfile } from "../engine/goals.js";
 import { readProtocols } from "../engine/protocol.js";
 import { activeScanOwner } from "../engine/scanScope.js";
 import "./maxRoutinePicker.css";
-import { allowanceLine } from "../engine/maxAllowance.js";
+import { allowanceLine, parseMaxRemaining } from "../engine/maxAllowance.js";
 import { requestedActionPlan } from "./maxActionBridge.js";
 import { drainMaxStream, maxStreamErrorMessage } from "./maxStream.js";
 import { maxReplyText } from "../engine/maxReplyText.js";
+import { maxUndeliveredReply } from "../engine/maxReplyStatus.js";
 import {
   announceMaxConversationChanged,
   loadMaxConversation,
@@ -52,6 +57,8 @@ let inFlight: AbortController | null = null;
 let chatGeneration = 0;
 let keydownListener: ((event: KeyboardEvent) => void) | null = null;
 let chatAvatar: MaxAvatar3DHandle | null = null;
+let chatSpeech: MaxSpeechBubbleHandle | null = null;
+let stopChatViewport: (() => void) | null = null;
 let stopAuthWatch: (() => void) | null = null;
 let returnFocus: HTMLElement | null = null;
 // Every question put to him this session, so the follow-up chips never offer
@@ -69,6 +76,10 @@ export function closeMaxChat(): void {
   document.querySelector<HTMLDialogElement>(".max-routine-picker")?.close();
   inFlight?.abort();
   inFlight = null;
+  chatSpeech?.destroy();
+  chatSpeech = null;
+  stopChatViewport?.();
+  stopChatViewport = null;
   chatAvatar?.destroy();
   chatAvatar = null;
   if (keydownListener) {
@@ -106,12 +117,15 @@ export function openMaxChat(
   host.innerHTML = `
     <div class="maxchat-sheet" role="dialog" aria-modal="true" aria-label="Chat with Coach Max">
       <header class="maxchat-head">
-        <span class="maxchat-face">${maxCharacterMarkup({ mood: "happy" })}</span>
         <span class="maxchat-who">
           <b>Coach Max</b>
           <small>Your goals, routine and available scan readings.</small>
         </span>
         <button type="button" class="maxchat-close" aria-label="Close chat">&times;</button>
+        <div class="maxchat-presence">
+          <div class="maxchat-speech"></div>
+          <span class="maxchat-face">${maxCharacterMarkup({ mood: "happy" })}</span>
+        </div>
       </header>
       <div class="maxchat-log" role="log" aria-live="polite"></div>
       <div class="maxchat-action" hidden></div>
@@ -124,8 +138,12 @@ export function openMaxChat(
       <p class="maxchat-privacy">Your selected preferences, routine notes and available measurements are shared with Max. Photos are not sent in chat.</p>
     </div>`;
   document.body.appendChild(host);
+  stopChatViewport = bindMaxChatViewport(host);
   stopAuthWatch = onAuthChange(() => { if (activeScanOwner() !== owner) closeMaxChat(); });
   chatAvatar = mountMaxAvatar3D(host.querySelector(".maxchat-face"), { state: "idle", playful: false });
+  chatSpeech = mountMaxSpeechBubble(host.querySelector<HTMLElement>(".maxchat-speech")!, { maxCharacters: 120 });
+  if (!options.initialQuestion && !conversationId) chatAvatar.setState("wave");
+  chatSpeech.update(conversationId ? "Picking up our conversation." : "What would you like to work on?", { animate: false });
 
   const log = host.querySelector<HTMLElement>(".maxchat-log")!;
   const action = host.querySelector<HTMLElement>(".maxchat-action")!;
@@ -312,6 +330,8 @@ async function ask(
   face?.classList.remove("mx-mood-happy");
   face?.classList.add("mx-mood-thinking");
   chatAvatar?.setState("thinking");
+  chatAvatar?.setSpeechLevel(null);
+  chatSpeech?.clear();
 
   const controller = new AbortController();
   inFlight = controller;
@@ -398,9 +418,8 @@ async function ask(
       return null;
     }
     // How many are left today, said only once it matters (see maxAllowance).
-    const remainingHeader = Number(response.headers.get("X-Max-Remaining"));
     showAllowance(allowanceLine(
-      Number.isFinite(remainingHeader) ? remainingHeader : null,
+      parseMaxRemaining(response.headers.get("X-Max-Remaining")),
       response.headers.get("X-Max-Resets-At"),
     ));
 
@@ -413,12 +432,19 @@ async function ask(
         // who was at the bottom appear to have scrolled away from it.
         const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
         write(bubble, text);
+        // The transcript drain already provides the typing clock. Do not queue
+        // a second animation or duplicate screen-reader announcements here.
+        chatSpeech?.update(maxReplyText(text), { animate: false, complete: false });
+        chatAvatar?.setSpeechLevel(maxTextMouthLevel(text.charAt(text.length - 1)));
         if (atBottom) log.scrollTop = log.scrollHeight;
       },
       waiting: (on) => {
         const dots = bubble.querySelector<HTMLElement>(".mc-wait");
         if (dots) dots.hidden = !on;
-        if (isCurrent()) chatAvatar?.setState(on ? "thinking" : "speaking");
+        if (isCurrent()) {
+          chatAvatar?.setState(on ? "thinking" : "speaking");
+          chatAvatar?.setSpeechLevel(on ? 0 : null);
+        }
       },
     });
     if (!isCurrent()) return null;
@@ -430,7 +456,14 @@ async function ask(
       transcript.pop();
       return null;
     }
+    const undelivered = maxUndeliveredReply(said);
+    if (undelivered) {
+      fail(bubble, undelivered);
+      transcript.pop();
+      return null;
+    }
     transcript.push({ role: "assistant", content: said });
+    chatSpeech?.update(maxReplyText(said), { animate: false, complete: true });
     // Said his piece: a small nod as the reply lands. Follow-through, not
     // celebration — the reply is the content, the nod is the punctuation.
     reactMax(form.closest(".maxchat")?.querySelector<HTMLElement>(".maxchat-face") ?? null, "nod");
@@ -448,6 +481,7 @@ async function ask(
     // that left the thinking class on would strand him mid-thought with a
     // thought bubble over an error message, and nothing would ever clear it.
     if (generation === chatGeneration) {
+      chatAvatar?.setSpeechLevel(null);
       chatAvatar?.setState("idle");
       if (face?.isConnected) {
         face.classList.remove("speaking", "mx-mood-thinking");
@@ -469,6 +503,7 @@ function showAllowance(line: string | null): void {
 }
 
 function fail(bubble: HTMLElement, message: string): void {
+  chatSpeech?.clear();
   bubble.classList.remove("thinking");
   bubble.classList.add("maxchat-err");
   bubble.textContent = message;

@@ -63,6 +63,7 @@ const face = (id: string, ratedBy?: RatedFace["ratedBy"]): RatedFace => ({
   sex: "male",
   rating: 7.8,
   scored: 5.5,
+  ratingTarget: "front",
   ...(ratedBy ? { ratedBy } : {}),
   measurements: { fwhr: 1.97 },
 });

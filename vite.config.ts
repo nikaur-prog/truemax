@@ -59,6 +59,11 @@ export default defineConfig({
         // NOT importing the consumer app's engine or styles.
         league: resolve(import.meta.dirname, "league.html"),
         guides: resolve(import.meta.dirname, "guides.html"),
+        measurements: resolve(import.meta.dirname, "measurements.html"),
+        gonialAngleGuide: resolve(import.meta.dirname, "measurement-gonial-angle.html"),
+        canthalTiltGuide: resolve(import.meta.dirname, "measurement-canthal-tilt.html"),
+        sideProfileGuide: resolve(import.meta.dirname, "measurement-side-profile-analysis.html"),
+        analytics: resolve(import.meta.dirname, "analytics.html"),
         faceScore: resolve(import.meta.dirname, "face-score.html"),
         improveLooks: resolve(import.meta.dirname, "improve-your-looks.html"),
         looksmaxxingGuide: resolve(import.meta.dirname, "looksmaxxing-guide.html"),

@@ -216,8 +216,24 @@ test("only failures, not deliberate cancellation, produce a user error message",
   const abort = new AbortController();
   assert.match(maxStreamErrorMessage(new Error("offline"), abort.signal)!, /lost the connection/);
   assert.match(maxStreamErrorMessage(new DOMException("timeout", "TimeoutError"), abort.signal)!, /too long/);
+  assert.match(maxStreamErrorMessage(new DOMException("upstream stopped", "AbortError"), abort.signal)!, /lost the connection/);
   abort.abort();
   assert.equal(maxStreamErrorMessage(new Error("stream stopped"), abort.signal), null);
+});
+
+test("whitespace before the first word does not start an empty speaking bubble", async () => {
+  const s = setup();
+  const result = drainMaxStream(s.stream, s.view, s.clock);
+  s.enqueue(" \n\t");
+  await flush();
+  s.clock.step(2000);
+  assert.equal(s.begins(), 0);
+  s.enqueue("One next step.");
+  s.controller.close();
+  await flush();
+  s.clock.step(1000);
+  assert.equal(await result, "One next step.");
+  assert.equal(s.begins(), 1);
 });
 
 test("the chat owns its stream, face, cleanup and generation rather than the newer dialog", () => {
@@ -227,5 +243,7 @@ test("the chat owns its stream, face, cleanup and generation rather than the new
   assert.match(source, /finally \{\s+window\.clearTimeout\(giveUp\);[\s\S]*if \(generation === chatGeneration\) \{[\s\S]*if \(form\.isConnected\) form\.classList\.remove\("busy"\)/);
   assert.match(source, /if \(inFlight === controller\) inFlight = null/);
   assert.doesNotMatch(source, /document\.querySelector[^\n]*maxchat-face/);
-  assert.match(source, /const atBottom = log\.scrollHeight[\s\S]*write\(bubble, text\);\s+if \(atBottom\) log\.scrollTop = log\.scrollHeight/);
+  const writeCallback = source.match(/write: \(text\) => \{([\s\S]*?)\n\s*\},\n\s*waiting:/)?.[1];
+  assert.ok(writeCallback, "the active stream owns its text-rendering callback");
+  assert.match(writeCallback, /const atBottom = log\.scrollHeight[\s\S]*write\(bubble, text\);[\s\S]*if \(atBottom\) log\.scrollTop = log\.scrollHeight/);
 });

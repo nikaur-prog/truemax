@@ -1011,6 +1011,17 @@ export function analyzeSide(points: SidePoints, faceDir: number, sex: Sex): Repo
   const raw = computeSideMetrics(points, faceDir);
   const invalid = SIDE_METRICS.filter((m) => !Number.isFinite(raw[m.id])).map((m) => m.id);
   if (invalid.length) throw new Error(`Profile scan produced invalid measurements: ${invalid.join(", ")}`);
+  return scoreSideMeasurements(raw, sex);
+}
+
+/**
+ * Replay the existing side scorer without an image or detector. This retains
+ * the legacy no-table mapping, including its known all-band ceiling, so an
+ * offline candidate can be compared without changing a customer's report.
+ * Missing values follow the existing metric-exclusion behavior. Live scans
+ * still pass the point-integrity and completeness checks in analyzeSide.
+ */
+export function scoreSideMeasurements(raw: Record<string, number>, sex: Sex): Report {
   const scored = SIDE_METRICS.map((def) => scoreMetric(def, raw[def.id], sex));
   // SIDE_AGG_PREFIX, not the bare keys. Without it every aggregate here is
   // looked up in a table measured from front photographs — see the comment on

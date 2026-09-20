@@ -1,6 +1,8 @@
 import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { SidePoints } from "../engine/sideMetrics.js";
 import type { Report } from "../engine/types.js";
+import { calibrationCaptureScores } from "../engine/calibrationComparison.js";
+import type { CalibrationCaptureScores, CalibrationRatingTarget } from "../engine/calibrationComparison.js";
 
 export interface CalibrationCapture {
   front: Report | null;
@@ -12,6 +14,8 @@ export interface CalibrationCapture {
 }
 
 export interface CalibrationVerdictSnapshot {
+  captureScores: CalibrationCaptureScores;
+  ratingTarget?: CalibrationRatingTarget;
   hasSide: boolean;
   /** Only a second view may be merged with the primary report. */
   additionalSide: Report | null;
@@ -41,6 +45,7 @@ export function calibrationVerdictSnapshot(primary: Report, capture: Calibration
     }
     : null;
   return {
+    captureScores: calibrationCaptureScores(capture.front, capture.side),
     hasSide: capture.side !== null,
     additionalSide,
     suspect: [...reports].reduce((count, report) => count + report.metrics.filter((metric) => metric.implausible).length, 0),

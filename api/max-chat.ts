@@ -11,6 +11,7 @@ import { authenticatedUser, getSupabaseAdmin, json, requestOrigin, safeMessage }
 import { maxAccessForUser } from "./_maxAccess.js";
 import { conversationTitle, parsePlanMemoryCommand } from "./_maxConversation.js";
 import { hydrateRoutineContext } from "./_maxRoutineSync.js";
+import { createMaxReplyStream } from "./_maxReplyStream.js";
 
 // ---------------------------------------------------------------------------
 // Talking to Max.
@@ -303,54 +304,39 @@ export async function POST(request: Request): Promise<Response> {
     // reader over a text stream is a third of the code an EventSource parser
     // is. The remaining allowance rides in a header so the UI can warn before
     // somebody types the message that gets refused.
-    const encoder = new TextEncoder();
-    let deliveredText = false;
-    let assistantText = "";
-    const readable = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        try {
-          for await (const event of stream) {
-            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-              deliveredText = deliveredText || event.delta.text.length > 0;
-              assistantText += event.delta.text;
-              controller.enqueue(encoder.encode(event.delta.text));
-            }
-          }
-        } catch (error) {
-          // The stream has already started, so the status line is long gone and
-          // there is no way to turn this into an HTTP error. Say so in the body
-          // instead; a message that stops mid-sentence with no explanation
-          // reads as the app being broken.
-          console.error("max-chat stream", safeMessage(error));
-          controller.enqueue(encoder.encode("\n\nSorry, I lost my train of thought there. Ask me again?"));
-        } finally {
-          // A provider that failed before delivering any answer did not provide
-          // the turn the member paid for. Partial answers still count: tokens
-          // were delivered and the retry request is a new generation.
-          if (!deliveredText) {
-            await releaseClaim().catch((releaseError) => {
-              console.error("max-chat allowance release", safeMessage(releaseError));
-            });
-          } else {
-            claimedUserId = null;
-            const savedAt = new Date().toISOString();
-            const assistantInsert = await admin.from("max_messages").insert({
-              conversation_id: conversation.id,
-              user_id: user.id,
-              role: "assistant",
-              content: assistantText.trim().slice(0, 8000),
-              created_at: savedAt,
-            });
-            const updated = assistantInsert.error ? null : await admin
+    const readable = createMaxReplyStream(stream, {
+      async settle({ text: assistantText, delivered: deliveredText, cancelled }) {
+        if (cancelled) return;
+        // A provider that failed before delivering any answer did not provide
+        // the turn the member paid for. Partial answers still count: tokens
+        // were delivered and the retry request is a new generation.
+        if (!deliveredText) {
+          await releaseClaim().catch((releaseError) => {
+            console.error("max-chat allowance release", safeMessage(releaseError));
+          });
+        } else {
+          claimedUserId = null;
+          const savedAt = new Date().toISOString();
+          const assistantInsert = await admin.from("max_messages").insert({
+            conversation_id: conversation.id,
+            user_id: user.id,
+            role: "assistant",
+            content: assistantText.trim().slice(0, 8000),
+            created_at: savedAt,
+          });
+          if (assistantInsert.error) throw new Error(assistantInsert.error.message);
+          // The reply is durable once its insert succeeds. A failed recency
+          // update must not tell the member to retry an already-saved answer.
+          try {
+            const updated = await admin
               .from("max_conversations")
               .update({ updated_at: savedAt, last_message_at: savedAt })
               .eq("id", conversation.id)
               .eq("user_id", user.id);
-            if (assistantInsert.error || updated?.error) {
-              console.error("max-chat persistence", assistantInsert.error?.message ?? updated?.error?.message);
-            }
+            if (updated.error) throw new Error(updated.error.message);
+          } catch (metadataError) {
+            console.error("max-chat conversation recency update", safeMessage(metadataError));
           }
-          controller.close();
         }
       },
       cancel() {
@@ -360,8 +346,8 @@ export async function POST(request: Request): Promise<Response> {
         // A user-cancelled response still consumed provider work, so it keeps
         // its turn; only provider/setup failures are refunded above.
         claimedUserId = null;
-        stream.abort();
       },
+      error(stage, error) { console.error(`max-chat ${stage}`, safeMessage(error)); },
     });
 
     return new Response(readable, {
