@@ -8,7 +8,7 @@ const camera = source.slice(source.indexOf("async function openSideCamera"), sou
 test("late side-camera callbacks cannot cancel or paint a replacement attempt", () => {
   assert.match(camera, /const ownsCamera = \(\) => attempt === sideCamAttempt/);
   assert.match(camera, /activeScanOwner\(\) === cameraOwner/);
-  assert.match(camera, /onPause: \(\) => \{ if \(ownsCamera\(\)\) auto\?\.cancel\(\); \}/);
+  assert.match(camera, /onPause: \(\) => \{\s*if \(!ownsCamera\(\)\) return;\s*if \(isAppForeground\(\)\) auto\?\.update\(false\);\s*else auto\?\.cancel\(\);/);
   for (const callback of ["onLost: () =>", "onCheck: (c) =>", "onTick: (remaining) =>", "onFire: () =>"]) {
     const start = camera.indexOf(callback);
     assert.ok(start >= 0);

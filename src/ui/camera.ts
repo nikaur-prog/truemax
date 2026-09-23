@@ -2,7 +2,7 @@ import { detectVideo, initLandmarker, setRunningMode } from "../engine/landmarke
 import { checkFrame, checkSideFrame, frameStats } from "../engine/captureGuide.js";
 import { detectOcclusion } from "../engine/occlusion.js";
 import type { FrameCheck } from "../engine/captureGuide.js";
-import { faceBounds, fitFrontPreview, settleFrontPreview } from "../engine/frontFraming.js";
+import { faceBounds, fitFrontPreview, settleFrontPreview, stableFrontPreviewTarget } from "../engine/frontFraming.js";
 import type { PreviewFit, SourceFrame } from "../engine/frontFraming.js";
 import { createPreviewCadence, createPreviewLoop } from "./previewLoop.js";
 import type { PreviewLoop } from "./previewLoop.js";
@@ -15,6 +15,8 @@ import { isAppForeground, subscribeNativeActivity } from "../engine/nativeBridge
 export interface CameraHandle {
   stop(): void;
   capture(): HTMLCanvasElement | null;
+  /** Hold the displayed framing during a countdown without freezing source checks. */
+  setFramingLocked?(locked: boolean): void;
   /**
    * Switch to another camera: a phone flips between the front and back faces,
    * a desktop cycles through whatever cameras are plugged in. Resolves false
@@ -73,6 +75,7 @@ export async function permissionGranted(): Promise<boolean> {
 interface CameraEngine {
   initLandmarker(): Promise<void>;
   setRunningMode(mode: "IMAGE" | "VIDEO"): Promise<void>;
+  detectVideo?: typeof detectVideo;
 }
 
 // Engine boot is injectable so camera ownership can be exercised with real
@@ -94,6 +97,10 @@ export async function startCamera(
   const foregroundWaiters = new Set<() => void>();
   let previewLoop: PreviewLoop | null = null;
   let frontFit: PreviewFit | null = null;
+  let frontTarget: PreviewFit | null = null;
+  let frontSource: SourceFrame | null = null;
+  let frontViewport: SourceFrame | null = null;
+  let framingLocked = false;
   let frontFitAt = 0;
   let frontFitSize = "";
   let lastFaceAt = 0;
@@ -103,12 +110,19 @@ export async function startCamera(
     if (originalVideoStyle === null) opts.video.removeAttribute?.("style");
     else opts.video.setAttribute?.("style", originalVideoStyle);
     frontFit = null;
+    frontTarget = null;
+    frontSource = null;
+    frontViewport = null;
+    framingLocked = false;
     frontFitSize = "";
     frontFitAt = 0;
     lastFaceAt = 0;
   };
   const cadence = createPreviewCadence();
   let lastFrameAt = performance.now();
+  // Recovery gets time to resume, but only a changed source clock can make
+  // old pixels fresh enough to capture.
+  let watchdogGraceAt = lastFrameAt;
 
   const constraints = (): MediaStreamConstraints => ({
     video: {
@@ -300,7 +314,7 @@ export async function startCamera(
       opts.onPause?.();
       return;
     }
-    lastFrameAt = performance.now();
+    watchdogGraceAt = performance.now();
     cadence.reset();
     previewLoop?.resume();
     for (const wake of foregroundWaiters) wake();
@@ -399,8 +413,17 @@ export async function startCamera(
   const STALL_MS = 2600;
   const STALE_FRAME_MS = 500;
   let staleReported = false;
+  let activeLoopClockAt: number | null = null;
+  const observeFrame = (observedAt: number) => {
+    const v = opts.video;
+    if (v.readyState >= 2 && Number.isFinite(v.currentTime) && v.currentTime !== last) {
+      last = v.currentTime;
+      lastFrameAt = observedAt;
+      staleReported = false;
+    }
+  };
 
-  const loop = (now: number) => {
+  const previewFrame = (now: number) => {
     if (!live) return;
     if (!isAppForeground()) {
       previewLoop?.pause();
@@ -408,17 +431,13 @@ export async function startCamera(
       return;
     }
     const v = opts.video;
-    if (v.readyState >= 2 && v.currentTime !== last) {
-      last = v.currentTime;
-      lastFrameAt = now;
-      staleReported = false;
-    }
+    observeFrame(activeLoopClockAt ?? performance.now());
     if (v.readyState >= 2 && v.currentTime !== analyzedTime && cadence.due(now)) {
       analyzedTime = v.currentTime;
       const ts = performance.now();
       let result = null;
       try {
-        result = detectVideo(v, ts);
+        result = (engine.detectVideo ?? detectVideo)(v, ts);
       } catch {
         /* mode switch in flight — skip this frame */
       }
@@ -440,25 +459,42 @@ export async function startCamera(
       if (!side) {
         const size = { width: opts.guideCanvas.clientWidth || opts.guideCanvas.width, height: opts.guideCanvas.clientHeight || opts.guideCanvas.height };
         const sizeKey = `${source.width}:${source.height}:${size.width}:${size.height}`;
-        if (frontFitSize !== sizeKey) { frontFit = null; frontFitSize = sizeKey; }
+        if (frontFitSize !== sizeKey) {
+          // Start from a full source view and ease toward the face. Even the
+          // first detector result must not snap the preview into a close-up.
+          frontFit = fitFrontPreview(source, size, null);
+          frontTarget = frontFit;
+          frontFitAt = now;
+          frontFitSize = sizeKey;
+        }
+        frontSource = source;
+        frontViewport = size;
         const bounds = lm ? faceBounds(lm) : null;
         if (bounds) lastFaceAt = now;
         // Brief tracking loss does not zoom out and back on every blink.
         // Reduced-motion keeps the initial source view stationary.
         if (bounds || !frontFit || now - lastFaceAt > 1200) {
           const target = fitFrontPreview(source, size, bounds);
-          frontFit = settleFrontPreview(frontFit, target, now - frontFitAt, reducedMotion);
-          applyFrontFit(v, source, size, frontFit, facing === "environment");
+          frontTarget = stableFrontPreviewTarget(frontTarget, target, source);
         }
-        frontFitAt = now;
       }
       const check = side
         ? checkSideFrame(result, stats)
         : checkFrame(result, stats, source, glasses);
       opts.onCheck(check);
       if (!live) return;
-      drawGuide(opts.guideCanvas, v, side ? null : frontFit);
+      if (side) drawGuide(opts.guideCanvas, v);
       cadence.measured(ts, performance.now());
+    }
+    // Smooth at display cadence, not at the detector's ten reads per second.
+    // Video and its debug mapping always use the identical interpolated fit.
+    if (!side && frontTarget && frontSource && frontViewport) {
+      if (!framingLocked) frontFit = settleFrontPreview(frontFit, frontTarget, now - frontFitAt, reducedMotion);
+      frontFitAt = now;
+      if (frontFit) {
+        applyFrontFit(v, frontSource, frontViewport, frontFit, facing === "environment");
+        drawGuide(opts.guideCanvas, v, frontFit);
+      }
     }
     if (!staleReported && now - lastFrameAt > STALE_FRAME_MS) {
       staleReported = true;
@@ -468,12 +504,23 @@ export async function startCamera(
       live &&
       !reacquiring &&
       isAppForeground() &&
-      now - lastFrameAt > STALL_MS
+      now - Math.max(lastFrameAt, watchdogGraceAt) > STALL_MS
     ) {
       // Reset the clock before the attempt so a slow reacquire does not
       // retrigger itself every frame.
-      lastFrameAt = now;
+      watchdogGraceAt = now;
       void reacquire();
+    }
+  };
+
+  const loop = (now: number) => {
+    activeLoopClockAt = performance.now();
+    try {
+      previewFrame(now);
+    } finally {
+      // This allowance belongs only to this synchronous preview callback.
+      // Later shutter attempts must observe the source clock again.
+      activeLoopClockAt = null;
     }
   };
 
@@ -485,7 +532,16 @@ export async function startCamera(
     capture() {
       if (!live || !isAppForeground() || !stream || opts.video.srcObject !== stream) return null;
       const v = opts.video;
-      if (!v.videoWidth) return null;
+      const track = stream.getVideoTracks()[0];
+      if (v.readyState < 2 || !v.videoWidth || !v.videoHeight || !Number.isFinite(v.currentTime) || !track || track.readyState !== "live" || track.muted) return null;
+      // HTML keeps currentTime's official playback position stable while a
+      // script runs. An onCheck shutter after slow synchronous inference must
+      // judge the source observation at this task's entry, not count detector
+      // CPU time as a frozen camera. A subsequent task gets no such allowance:
+      // it checks the current source clock, and unchanged clocks never refresh.
+      const capturedAt = activeLoopClockAt ?? performance.now();
+      observeFrame(capturedAt);
+      if (capturedAt - lastFrameAt > STALE_FRAME_MS) return null;
       const c = document.createElement("canvas");
       c.width = v.videoWidth;
       c.height = v.videoHeight;
@@ -501,6 +557,7 @@ export async function startCamera(
       ctx.drawImage(v, 0, 0);
       return c;
     },
+    setFramingLocked(locked) { framingLocked = locked; },
     async swap() {
       if (!live || !isAppForeground() || attaching) return false;
       const wasFacing = facing;

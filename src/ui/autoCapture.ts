@@ -20,12 +20,16 @@
 // himself.
 // ---------------------------------------------------------------------------
 
+import { playCaptureTick } from "./captureFeedback.js";
+
 export interface AutoCapture {
   // Called with the current readiness on every analysed frame.
   update(ready: boolean): void;
   // Stop counting and forget any progress, without firing.
   cancel(): void;
   armed(): boolean;
+  // Includes a brief paused count, so its framing can remain steady.
+  hasProgress(): boolean;
 }
 
 interface Opts {
@@ -55,6 +59,12 @@ export function createAutoCapture(opts: Opts): AutoCapture {
   // has to be able to refuse to run while paused. See the guard in frame().
   let pausedAt = 0;
   let badSince = 0;
+  // The latest time any caller has shown the countdown. frame() is driven by
+  // two clocks: requestAnimationFrame's frame-start stamp, and performance.now()
+  // from a readiness update that arrives after synchronous CPU inference. The
+  // next paint's stamp can be OLDER than that update, and reading it raw moved
+  // the count backwards across a step: 2, 1, 2, 1, with both beeps replayed.
+  let clock = 0;
 
   const stop = () => {
     if (raf) cancelAnimationFrame(raf);
@@ -67,11 +77,13 @@ export function createAutoCapture(opts: Opts): AutoCapture {
     if (!raf) raf = requestAnimationFrame(frame);
   };
 
-  const frame = (now: number) => {
+  const frame = (stamp: number) => {
     // The callback identified by `raf` is the callback running now. Clear it
     // before doing any work so a readiness update arriving during this frame
     // can schedule exactly one successor, never a parallel countdown loop.
     raf = 0;
+    const now = Math.max(stamp, clock);
+    clock = now;
     // An iOS background/foreground transition can dispatch a queued paint
     // before the next camera result. Never spend time hidden as a countdown.
     if (typeof document !== "undefined" && document.visibilityState !== "visible") {
@@ -101,10 +113,11 @@ export function createAutoCapture(opts: Opts): AutoCapture {
 
     // Counting down out loud is the whole point: on the side capture the person
     // is turned away from the screen and the audio is all they have.
-    if (whole !== lastBeep) {
+    // A count only ever steps down. stop() resets lastBeep for a fresh count.
+    if (lastBeep < 0 || whole < lastBeep) {
       lastBeep = whole;
       if (whole > 0) {
-        tick(whole);
+        playCaptureTick(whole);
         // The label changes twice, not on every animation frame. Rewriting
         // identical camera text sixty times a second makes layout compete
         // with inference on the phones that need the countdown most.
@@ -114,12 +127,12 @@ export function createAutoCapture(opts: Opts): AutoCapture {
 
     if (remaining <= 0) {
       fired = true;
-      shutter();
       stop();
       opts.onTick(null);
       opts.onFire();
-      // Allow a later re-arm (retake, second capture) once this one is spent.
-      fired = false;
+      // One camera attempt gets one automatic shutter. A failed/slow handoff
+      // must not restart 2-1 forever. Retaking creates a new controller; manual
+      // retry remains available when the caller reports a capture error.
       return;
     }
     schedule();
@@ -170,13 +183,22 @@ export function createAutoCapture(opts: Opts): AutoCapture {
 
   return {
     update(ready: boolean) {
+      if (fired) return;
       if (ready) {
+        // A stalled camera may deliver no further updates until it recovers.
+        // Check abandonment here too, not only on repeated bad frames.
+        if (pausedAt && performance.now() - pausedAt >= ABANDON_MS) {
+          stop();
+          pausedAt = 0;
+          opts.onTick(null);
+        }
         badSince = 0;
         if (pausedAt && startedAt !== null) {
           // Resume where it stopped: push the start forward by exactly the
           // time spent paused, so the remaining count is unchanged.
           startedAt += performance.now() - pausedAt;
           pausedAt = 0;
+          if (lastBeep > 0) opts.onTick(lastBeep);
           // iOS can starve animation frames while its camera and landmark
           // work are busy. A fresh readiness result is still a reliable clock
           // opportunity, so advance immediately as well as requesting paint.
@@ -213,6 +235,7 @@ export function createAutoCapture(opts: Opts): AutoCapture {
         pausedAt = now;
         if (raf) cancelAnimationFrame(raf);
         raf = 0;
+        opts.onTick(null);
       }
     },
     cancel() {
@@ -221,108 +244,8 @@ export function createAutoCapture(opts: Opts): AutoCapture {
       badSince = 0;
       opts.onTick(null);
     },
-    // Paused still counts as armed: the count is held, not discarded, and a
-    // caller asking "is a capture under way" should hear yes.
-    armed: () => startedAt !== null,
+    // Keep the progress internally, but let live coaching explain a pause.
+    armed: () => startedAt !== null && !pausedAt,
+    hasProgress: () => startedAt !== null && !fired,
   };
-}
-
-// --- audio ------------------------------------------------------------------
-//
-// Created lazily and only ever from inside a user gesture chain (the camera is
-// opened by a click), which is what browsers require. If audio is blocked or
-// unavailable the countdown still runs; it just goes quiet, so nothing here can
-// stop a capture.
-
-let ac: AudioContext | null = null;
-function ctx(): AudioContext | null {
-  try {
-    const Ctor =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return null;
-    ac = ac ?? new Ctor();
-    if (ac.state === "suspended") void ac.resume();
-    return ac;
-  } catch {
-    return null;
-  }
-}
-
-function beep(freq: number, ms: number, gain: number): void {
-  const a = ctx();
-  if (!a) return;
-  try {
-    const osc = a.createOscillator();
-    const vol = a.createGain();
-    osc.frequency.value = freq;
-    osc.type = "sine";
-    // Shaped rather than square-edged, because an abrupt gate on a sine is a
-    // click, and a click is the least pleasant sound a face app could make.
-    const t = a.currentTime;
-    vol.gain.setValueAtTime(0, t);
-    vol.gain.linearRampToValueAtTime(gain, t + 0.01);
-    vol.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
-    osc.connect(vol).connect(a.destination);
-    osc.start(t);
-    osc.stop(t + ms / 1000 + 0.02);
-  } catch {
-    /* audio is a courtesy, never a requirement */
-  }
-}
-
-// Traffic-light progression: a low first beat, a higher second beat, then the
-// distinct high shutter ping. This matters most for the side photo, when the
-// person is looking away from the screen and cannot read visual directions.
-function tick(remaining: number): void {
-  beep(remaining >= 2 ? 440 : 660, 100, 0.055);
-}
-
-// An actual camera shutter, not another beep.
-//
-// This was a 1040Hz sine, and a sine is the one thing a shutter is not: a
-// mechanical shutter is broadband noise — a snap, not a pitch. On the side
-// capture the person is turned away from the screen and the sound is the entire
-// feedback channel, so "the photo was taken" has to be unmistakable from "the
-// countdown is still running". Two beeps and a third beep is a countdown that
-// stopped. Two beeps and a CLICK is a photograph.
-//
-// Built as two short filtered noise bursts a few milliseconds apart, which is
-// what an SLR mirror actually does — up, then down. Nobody consciously hears
-// the two halves; they hear a camera.
-function shutter(): void {
-  noiseClick(0, 0.055, 2600);
-  noiseClick(0.045, 0.04, 1800);
-}
-
-function noiseClick(delay: number, gain: number, cutoff: number): void {
-  const a = ctx();
-  if (!a) return;
-  try {
-    const t = a.currentTime + delay;
-    const len = Math.floor(a.sampleRate * 0.05);
-    const buffer = a.createBuffer(1, len, a.sampleRate);
-    const data = buffer.getChannelData(0);
-    // White noise, decaying fast. The steep envelope is what makes it read as a
-    // mechanism rather than as static.
-    for (let i = 0; i < len; i++) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 6;
-    }
-    const src = a.createBufferSource();
-    src.buffer = buffer;
-    // Band-passed so it sits where a small mechanism sits, instead of hissing
-    // across the whole spectrum.
-    const filter = a.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.value = cutoff;
-    filter.Q.value = 0.8;
-    const vol = a.createGain();
-    vol.gain.setValueAtTime(gain, t);
-    vol.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    src.connect(filter).connect(vol).connect(a.destination);
-    src.start(t);
-    src.stop(t + 0.06);
-  } catch {
-    /* audio is a courtesy, never a requirement */
-  }
 }

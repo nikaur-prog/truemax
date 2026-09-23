@@ -7,6 +7,7 @@ export interface ScanConfirmOptions {
   confirmLabel: string;
   cancelLabel: string;
   preview?: HTMLCanvasElement;
+  previewLabel?: string;
   /** An illustrative capture example, never the person's own photograph. */
   example?: { src: string; alt: string; caption: string };
   tone?: ScanConfirmTone;
@@ -74,7 +75,7 @@ export function confirmScanAction(options: ScanConfirmOptions): Promise<boolean>
       canvas.width = size.width;
       canvas.height = size.height;
       canvas.getContext("2d")?.drawImage(options.preview, 0, 0, size.width, size.height);
-      canvas.setAttribute("aria-label", "The front photo you just captured");
+      canvas.setAttribute("aria-label", options.previewLabel ?? "The front photo you just captured");
       figure.appendChild(canvas);
       card.appendChild(figure);
     }
