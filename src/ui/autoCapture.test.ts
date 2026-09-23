@@ -61,6 +61,87 @@ test("a clean run fires after the full countdown", () => {
   assert.equal(h.fired(), 1);
 });
 
+test("a completed countdown cannot start 2-1 again while capture is slow or rejected", () => {
+  const h = harness();
+  h.auto.update(true);
+  advance(1600);
+  for (let i = 0; i < 30; i++) {
+    h.auto.update(i % 4 !== 0);
+    advance(200);
+  }
+  assert.equal(h.fired(), 1);
+  assert.deepEqual(h.ticks, [2, null]);
+  assert.equal(h.auto.armed(), false);
+});
+
+test("cancel during handoff cannot re-arm the spent camera attempt", () => {
+  const h = harness();
+  h.auto.update(true);
+  advance(800);
+  advance(800);
+  h.auto.cancel();
+  h.auto.update(true);
+  advance(2000);
+  assert.equal(h.fired(), 1);
+});
+
+test("a throwing capture handoff is still spent, rather than repeating the countdown", () => {
+  now = 1000;
+  frames.clear();
+  let calls = 0;
+  const auto = createAutoCapture({ onTick() {}, onFire() { calls++; throw new Error("no frame"); } });
+  auto.update(true);
+  assert.throws(() => advance(1600), /no frame/);
+  auto.update(true);
+  advance(1600);
+  assert.equal(calls, 1);
+});
+
+test("a paused countdown exposes live coaching, then resumes without restarting its number", () => {
+  const h = harness();
+  h.auto.update(true);
+  advance(800);
+  h.auto.update(false);
+  assert.equal(h.auto.armed(), false);
+  assert.equal(h.auto.hasProgress(), true, "paused countdown retains its framing lock");
+  assert.equal(h.ticks[h.ticks.length - 1], null);
+  now += 300;
+  h.auto.update(true);
+  assert.equal(h.auto.armed(), true);
+  assert.equal(h.ticks[h.ticks.length - 1], 1);
+  advance(750);
+  assert.equal(h.fired(), 1);
+  assert.equal(h.auto.hasProgress(), false);
+  assert.equal(h.ticks.filter(tick => tick === 2).length, 1);
+});
+
+test("a brief camera stall preserves 1 even without intermediate readiness callbacks", () => {
+  const h = harness();
+  h.auto.update(true);
+  advance(800);
+  h.auto.update(false); // Camera onPause, not cancellation.
+  now += 650;
+  h.auto.update(true);
+  assert.equal(h.ticks[h.ticks.length - 1], 1);
+  assert.equal(h.ticks.filter(t => t === 2).length, 1);
+  advance(710);
+  assert.equal(h.fired(), 1);
+});
+
+test("a camera returning after four seconds restarts safely even if it reported its stall only once", () => {
+  const h = harness();
+  h.auto.update(true);
+  advance(1400);
+  h.auto.update(false);
+  now += 4500;
+  h.auto.update(true);
+  assert.equal(h.ticks[h.ticks.length - 1], 2);
+  advance(150);
+  assert.equal(h.fired(), 0);
+  advance(1400);
+  assert.equal(h.fired(), 1);
+});
+
 test("identical countdown labels are not repainted on every animation frame", () => {
   const h = harness(1.5);
   h.auto.update(true);
@@ -245,4 +326,78 @@ test("a single dropped frame does not throw away a long count", () => {
     advance(100);
   }
   assert.equal(h.fired(), 1, "ten single-frame dips must not prevent a capture");
+});
+
+// The browser log that found this: 2 (660Hz), 1 (880Hz), then 2 and 1 again
+// within 23ms, the label flipping back to "Capturing in 2". Two clocks drive the
+// count: performance.now() from a camera update that lands after synchronous
+// CPU inference, and requestAnimationFrame's frame-start stamp. The next
+// paint's stamp can be older than that update.
+// captureFeedback caches its AudioContext per page, so every recorder shares one log.
+const beepLog: number[] = [];
+function recordBeeps(): { hz: number[]; restore(): void } {
+  const hz = beepLog;
+  hz.length = 0;
+  const g = globalThis as unknown as { window?: unknown };
+  const previous = g.window;
+  const param = () => ({ setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} });
+  class FakeAudio {
+    state = "running";
+    currentTime = 0;
+    destination = {};
+    resume() { return Promise.resolve(); }
+    createGain() { return { gain: param(), connect: (d: unknown) => d, disconnect() {} }; }
+    createOscillator() {
+      let frequency = 0;
+      return {
+        type: "sine",
+        frequency: { setValueAtTime: (v: number) => { frequency = v; } },
+        connect: (gain: { connect(d: unknown): unknown }) => gain,
+        disconnect() {},
+        start: () => { hz.push(frequency); },
+        stop() {},
+        onended: null,
+      };
+    }
+  }
+  g.window = { AudioContext: FakeAudio };
+  return { hz, restore: () => { g.window = previous; } };
+}
+
+test("an older paint stamp after a post-inference update cannot move the count or beeps backwards", () => {
+  const beeps = recordBeeps();
+  try {
+    const h = harness(1.5);
+    h.auto.update(true); // 1000: step 2
+    now = 1760; // camera update after a slow synchronous detector pass
+    h.auto.update(true); // step 1
+    // The paint that follows carries the frame-start stamp from before the update.
+    const pending = [...frames.entries()];
+    frames.clear();
+    for (const [, cb] of pending) cb(1740);
+    for (let i = 0; i < 6; i++) advance(150);
+    assert.deepEqual(h.ticks, [2, 1, null]);
+    assert.deepEqual(beeps.hz, [660, 880], "exactly one soft 2, then one higher 1");
+    assert.equal(h.fired(), 1);
+  } finally { beeps.restore(); }
+});
+
+test("interleaved update and paint clocks only ever count down", () => {
+  const beeps = recordBeeps();
+  try {
+    const h = harness(1.5);
+    h.auto.update(true);
+    // Updates run ahead of paint stamps by up to 90ms of inference, in every order.
+    for (let step = 0; step < 40 && !h.fired(); step++) {
+      now += 45;
+      if (step % 2) h.auto.update(true);
+      const pending = [...frames.entries()];
+      frames.clear();
+      for (const [, cb] of pending) cb(now - (step % 3) * 45);
+    }
+    const shown = h.ticks.filter((t): t is number => t !== null);
+    for (let i = 1; i < shown.length; i++) assert.ok(shown[i] < shown[i - 1], `count went ${shown[i - 1]} -> ${shown[i]}`);
+    assert.deepEqual(beeps.hz, [660, 880]);
+    assert.equal(h.fired(), 1);
+  } finally { beeps.restore(); }
 });

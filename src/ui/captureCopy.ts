@@ -21,6 +21,6 @@ export function automaticCaptureDetail(touchFirst = hasTouchFirstInput()): strin
 }
 
 export function sideCaptureInstruction(touchFirst = hasTouchFirstInput()): string {
-  const base = "<b>You will not be able to see this screen.</b> Turn until you hear the countdown, then hold still. Two beeps, then a higher shutter beep.";
+  const base = "<b>You will not be able to see this screen.</b> Turn until you hear the countdown, then hold still. Two rising beeps, then a camera snap.";
   return touchFirst ? base : `${base} Space bar takes it immediately.`;
 }

@@ -1,6 +1,7 @@
 import test from "node:test";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
+import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { readFileSync } from "node:fs";
 import { applyFrontFit, startCamera } from "./camera.js";
 import { bindNativeAppLifecycle } from "../engine/nativeBridge.js";
@@ -43,7 +44,10 @@ function mediaStream() {
 function environment(t: TestContext) {
   const pendingFrames = new Map<number, FrameRequestCallback>();
   let frameId = 0;
-  const context = { clearRect() {}, drawImage() {}, translate() {}, scale() {} };
+  const context = {
+    clearRect() {}, drawImage() {}, translate() {}, scale() {},
+    getImageData: () => ({ data: new Uint8ClampedArray(160 * 160 * 4).fill(128) }),
+  };
   const canvas = () => ({ width: 640, height: 480, classList: classList(), getContext: () => context });
   const doc = Object.assign(new EventTarget(), {
     visibilityState: "visible",
@@ -57,7 +61,7 @@ function environment(t: TestContext) {
     set srcObject(stream: MediaStream | null) { attached = stream; assignments.push(stream); },
     muted: false,
     playsInline: false,
-    readyState: 0,
+    readyState: 2,
     currentTime: 0,
     videoWidth: 640,
     videoHeight: 480,
@@ -77,7 +81,7 @@ function environment(t: TestContext) {
         return next;
       },
     } },
-    window: { setTimeout, clearTimeout },
+    window: { setTimeout, clearTimeout, devicePixelRatio: 1 },
     requestAnimationFrame: (callback: FrameRequestCallback) => { pendingFrames.set(++frameId, callback); return frameId; },
     cancelAnimationFrame: (id: number) => { pendingFrames.delete(id); },
   };
@@ -142,6 +146,214 @@ test("display fitting cannot change captured resolution and stop restores the or
   assert.equal(image?.height, 480);
   handle.stop();
   assert.deepEqual(mutations[mutations.length - 1], ["style", "opacity: 0.9"]);
+});
+
+test("capture refuses unavailable, zero-height, muted, ended or stale camera frames", async (t) => {
+  const env = environment(t);
+  let now = 1000;
+  t.mock.method(performance, "now", () => now);
+  const media = mediaStream();
+  env.requests.push(Promise.resolve(media.stream));
+  const handle = await startCamera(env.opts(), env.engine);
+  try {
+    assert.ok(handle.capture());
+    env.video.readyState = 1;
+    assert.equal(handle.capture(), null);
+    env.video.readyState = 2;
+    env.video.videoHeight = 0;
+    assert.equal(handle.capture(), null);
+    env.video.videoHeight = 480;
+    media.track.muted = true;
+    assert.equal(handle.capture(), null);
+    media.track.muted = false;
+    media.track.readyState = "ended";
+    assert.equal(handle.capture(), null);
+    media.track.readyState = "live";
+    assert.ok(handle.capture());
+    now += 501;
+    assert.equal(handle.capture(), null);
+  } finally { handle.stop(); }
+});
+
+test("foreground recovery gives the watchdog grace without making a frozen source capturable", async (t) => {
+  const env = environment(t);
+  let now = 1000;
+  t.mock.method(performance, "now", () => now);
+  env.requests.push(Promise.resolve(mediaStream().stream));
+  const handle = await startCamera(env.opts(), { ...env.engine, detectVideo: () => null });
+  try {
+    assert.ok(handle.capture());
+    env.doc.visibilityState = "hidden";
+    env.doc.dispatchEvent(new Event("visibilitychange"));
+    now = 5000;
+    env.doc.visibilityState = "visible";
+    env.doc.dispatchEvent(new Event("visibilitychange"));
+    assert.equal(handle.capture(), null, "resuming does not refresh unchanged source pixels");
+    const [id, callback] = [...env.pendingFrames][0];
+    env.pendingFrames.delete(id);
+    callback(now);
+    assert.equal(env.requested, 1, "the watchdog still lets the existing stream resume before reacquiring");
+    assert.equal(handle.capture(), null);
+    env.video.currentTime += 1 / 30;
+    assert.ok(handle.capture(), "the first genuinely new source frame restores capture");
+  } finally { handle.stop(); }
+});
+
+test("capture observes a fresh source frame after slow synchronous inference", async (t) => {
+  const env = environment(t);
+  let now = 1000;
+  t.mock.method(performance, "now", () => now);
+  env.requests.push(Promise.resolve(mediaStream().stream));
+  const handle = await startCamera(env.opts(), {
+    ...env.engine,
+    detectVideo: () => {
+      now += 600;
+      env.video.currentTime += 0.6;
+      return null;
+    },
+  });
+  try {
+    const [id, callback] = [...env.pendingFrames][0];
+    env.pendingFrames.delete(id);
+    callback(1000);
+    assert.equal(now, 1600);
+    assert.equal(env.video.currentTime, 0.6);
+    const shot = handle.capture();
+    assert.equal(shot?.width, 640);
+    assert.equal(shot?.height, 480);
+    now += 501;
+    assert.equal(handle.capture(), null, "the capture observation does not make a subsequently frozen source perpetually fresh");
+  } finally { handle.stop(); }
+});
+
+test("onCheck capture survives a source clock cached during 600ms inference but not a later frozen loop", async (t) => {
+  const env = environment(t);
+  let now = 1000;
+  t.mock.method(performance, "now", () => now);
+  env.requests.push(Promise.resolve(mediaStream().stream));
+  let capture: (() => HTMLCanvasElement | null) | null = null;
+  const checkedShots: Array<HTMLCanvasElement | null> = [];
+  const pausedShots: Array<HTMLCanvasElement | null> = [];
+  const handle = await startCamera({
+    ...env.opts(),
+    onCheck: () => { if (capture) checkedShots.push(capture()); },
+    onPause: () => { if (capture) pausedShots.push(capture()); },
+  }, {
+    ...env.engine,
+    // Browser currentTime is stable throughout this entire synchronous task.
+    detectVideo: () => { now += 600; return null; },
+  });
+  capture = () => handle.capture();
+  const tick = (time: number) => {
+    now = time;
+    const [id, callback] = [...env.pendingFrames][0];
+    env.pendingFrames.delete(id);
+    callback(time);
+  };
+  try {
+    env.video.currentTime = 1 / 30;
+    tick(1000);
+    assert.equal(now, 1600);
+    assert.equal(env.video.currentTime, 1 / 30);
+    assert.equal(checkedShots.length, 1);
+    assert.equal(checkedShots[0]?.width, 640, "capture runs inside onCheck after expensive inference");
+    assert.equal(checkedShots[0]?.height, 480);
+    assert.equal(handle.capture(), null, "the same-task allowance is already cleared on callback return");
+
+    tick(1650);
+    assert.equal(checkedShots.length, 1, "a frozen source is not reanalyzed");
+    assert.deepEqual(pausedShots, [null], "even a shutter inside the next loop rejects a genuinely frozen source");
+    assert.equal(handle.capture(), null);
+  } finally { handle.stop(); }
+});
+
+test("same-task frame allowance is cleared even when onCheck throws", async (t) => {
+  const env = environment(t);
+  let now = 1000;
+  t.mock.method(performance, "now", () => now);
+  env.requests.push(Promise.resolve(mediaStream().stream));
+  let capture: (() => HTMLCanvasElement | null) | null = null;
+  let shot: HTMLCanvasElement | null = null;
+  const handle = await startCamera({
+    ...env.opts(),
+    onCheck: () => {
+      shot = capture?.() ?? null;
+      throw new Error("test callback failure");
+    },
+  }, { ...env.engine, detectVideo: () => { now += 600; return null; } });
+  capture = () => handle.capture();
+  try {
+    env.video.currentTime = 1 / 30;
+    const [id, callback] = [...env.pendingFrames][0];
+    env.pendingFrames.delete(id);
+    assert.throws(() => callback(1000), /test callback failure/);
+    assert.ok(shot);
+    assert.equal(handle.capture(), null);
+  } finally { handle.stop(); }
+});
+
+test("slow inference cannot refresh a frozen source clock at capture", async (t) => {
+  const env = environment(t);
+  let now = 1000;
+  t.mock.method(performance, "now", () => now);
+  env.requests.push(Promise.resolve(mediaStream().stream));
+  const handle = await startCamera(env.opts(), {
+    ...env.engine,
+    detectVideo: () => { now += 600; return null; },
+  });
+  try {
+    const [id, callback] = [...env.pendingFrames][0];
+    env.pendingFrames.delete(id);
+    callback(1000);
+    assert.equal(now, 1600);
+    assert.equal(env.video.currentTime, 0);
+    assert.equal(handle.capture(), null);
+    now += 100;
+    assert.equal(handle.capture(), null, "repeated shutter attempts do not reset a frozen frame's age");
+    env.video.currentTime = 0.7;
+    assert.ok(handle.capture(), "the shutter recovers as soon as an actual new source frame is observed");
+  } finally { handle.stop(); }
+});
+
+test("camera zoom advances between detector reads and countdown lock leaves detection running", async (t) => {
+  const env = environment(t);
+  let now = 1000;
+  t.mock.method(performance, "now", () => now);
+  const video = Object.assign(env.video, { style: {} as CSSStyleDeclaration });
+  const lm = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 }));
+  lm[234].x = 0.3; lm[454].x = 0.7;
+  lm[10].y = 0.25; lm[152].y = 0.75;
+  const result: FaceLandmarkerResult = { faceLandmarks: [lm], faceBlendshapes: [], facialTransformationMatrixes: [] };
+  let reads = 0;
+  env.requests.push(Promise.resolve(mediaStream().stream));
+  const handle = await startCamera(env.opts(), { ...env.engine, detectVideo: () => { reads++; return result; } });
+  const tick = (time: number) => {
+    now = time;
+    video.currentTime += 1 / 60;
+    const [id, callback] = [...env.pendingFrames][0];
+    env.pendingFrames.delete(id);
+    callback(time);
+  };
+  try {
+    tick(1000);
+    const initial = video.style.transform;
+    assert.equal(reads, 1);
+    tick(1016);
+    const second = video.style.transform;
+    assert.notEqual(second, initial);
+    tick(1032);
+    assert.notEqual(video.style.transform, second);
+    assert.equal(reads, 1, "two paint frames advance before the next inference read");
+    handle.setFramingLocked?.(true);
+    const locked = video.style.transform;
+    tick(1048); tick(1064); tick(1112);
+    assert.equal(video.style.transform, locked);
+    assert.equal(reads, 2, "locking the display never stops source quality checks");
+    assert.equal(handle.capture()?.width, 640);
+    handle.setFramingLocked?.(false);
+    tick(1128);
+    assert.notEqual(video.style.transform, locked);
+  } finally { handle.stop(); }
 });
 
 async function nativeActivity() {
@@ -241,6 +453,24 @@ test("native pause stops preview, capture and swap until resume without needing 
     const paused = env.callbacks.paused;
     activity.set(false);
     assert.equal(env.callbacks.paused, paused, "stopped camera unsubscribes from native activity");
+  } finally { handle.stop(); activity.dispose(); }
+});
+
+test("native foreground recovery also waits for a new frame after a frozen interruption", async (t) => {
+  const env = environment(t);
+  let now = 1000;
+  t.mock.method(performance, "now", () => now);
+  const activity = await nativeActivity();
+  env.requests.push(Promise.resolve(mediaStream().stream));
+  const handle = await startCamera(env.opts(), env.engine);
+  try {
+    assert.ok(handle.capture());
+    activity.set(false);
+    now = 5000;
+    activity.set(true);
+    assert.equal(handle.capture(), null);
+    env.video.currentTime += 1 / 30;
+    assert.ok(handle.capture());
   } finally { handle.stop(); activity.dispose(); }
 });
 

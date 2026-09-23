@@ -46,8 +46,18 @@ test("front frame reset is scoped to the owned stream and side capture keeps its
   const camera = readFileSync(new URL("./camera.ts", import.meta.url), "utf8");
   assert.match(camera, /if \(ownedPreview\) \{\s*opts\.video\.srcObject = null;\s*restoreVideoStyle\(\)/);
   assert.match(camera, /stream = nextStream;\s*restoreVideoStyle\(\)/);
-  assert.match(camera, /if \(frontFitSize !== sizeKey\) \{ frontFit = null/);
-  assert.match(camera, /drawGuide\(opts\.guideCanvas, v, side \? null : frontFit\)/);
+  assert.match(camera, /if \(frontFitSize !== sizeKey\) \{[\s\S]*?frontFit = fitFrontPreview\(source, size, null\)/);
+  assert.match(camera, /if \(side\) drawGuide\(opts\.guideCanvas, v\)/);
+  assert.match(camera, /drawGuide\(opts\.guideCanvas, v, frontFit\)/);
   assert.match(camera, /now - lastFaceAt > 1200/);
   assert.match(camera, /prefers-reduced-motion: reduce/);
+});
+
+test("countdown can lock display fitting while quality checks and frame cadence stay live", () => {
+  const camera = readFileSync(new URL("./camera.ts", import.meta.url), "utf8");
+  assert.match(camera, /setFramingLocked\(locked\) \{ framingLocked = locked; \}/);
+  assert.match(camera, /if \(!framingLocked\) frontFit = settleFrontPreview/);
+  assert.ok(camera.indexOf("cadence.measured(ts, performance.now());") < camera.indexOf("if (!framingLocked) frontFit = settleFrontPreview"));
+  assert.match(camera, /frontTarget = stableFrontPreviewTarget\(frontTarget, target, source\)/);
+  assert.match(camera, /frontSource = null;\s*frontViewport = null;\s*framingLocked = false/);
 });

@@ -41,6 +41,9 @@ import { enterCameraTakeover, exitCameraTakeover } from "./camTakeover.js";
 import { setRunningMode } from "../engine/landmarker.js";
 import { resetSideTracking } from "../engine/captureGuide.js";
 import { createAutoCapture } from "./autoCapture.js";
+import { isAppForeground } from "../engine/nativeBridge.js";
+import { primeCaptureAudio, showCaptureFeedback } from "./captureFeedback.js";
+import { closeScanConfirm, confirmScanAction } from "./scanConfirm.js";
 import type { AutoCapture } from "./autoCapture.js";
 import type { CameraHandle } from "./camera.js";
 import { automaticCaptureDetail, sideCaptureInstruction } from "./captureCopy.js";
@@ -480,6 +483,7 @@ function wireSideInputs(e: ReturnType<typeof el>, ctx: SideCtx): void {
 }
 
 async function openSideCamera(ctx: SideCtx): Promise<void> {
+  primeCaptureAudio();
   const e = el();
   if (sideCam || sideCamOpening) return;
   const attempt = ++sideCamAttempt;
@@ -517,7 +521,14 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   // be read as "they turned away" rather than "there was never anyone there".
   // That memory has to start empty on every new attempt.
   resetSideTracking();
+  // A retake reopens this screen still showing the last attempt's capture copy
+  // ("Taking your photo"), which stayed up through the whole camera start.
+  e.hint.classList.remove("counting");
+  e.hintTitle.textContent = "Turn to the side";
+  e.hintDetail.textContent = "One ear toward the lens";
   let ready = false;
+  let capturing = false;
+  let captureRetry = false;
   const chooseUpload = (): void => {
     if (!ownsCamera()) return;
     stopSideCamera();
@@ -538,6 +549,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   auto = createAutoCapture({
     onTick: (remaining) => {
       if (!ownsCamera()) return;
+      sideCam?.setFramingLocked?.(remaining != null || !!auto?.hasProgress());
       const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
       if (remaining == null) {
         e.hint.classList.remove("counting");
@@ -551,8 +563,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
     },
     onFire: () => {
       if (!ownsCamera()) return;
-      const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
-      shoot?.click();
+      void takeSidePhoto();
     },
   });
   try {
@@ -561,7 +572,14 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       guideCanvas: e.guide,
       signal: cameraAbort.signal,
       mode: "side",
-      onPause: () => { if (ownsCamera()) auto?.cancel(); },
+      onPause: () => {
+        if (!ownsCamera()) return;
+        if (isAppForeground()) auto?.update(false);
+        else auto?.cancel();
+        if (capturing || captureRetry || !auto?.hasProgress()) return;
+        e.hintTitle.textContent = "Camera paused";
+        e.hintDetail.textContent = "Waiting for a live frame. The countdown will resume when the camera is ready.";
+      },
       // See main.ts: a swap that loses both cameras leaves nothing behind the
       // viewfinder, so the screen closes instead of decorating a dead frame.
       onLost: () => {
@@ -571,13 +589,13 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
       },
       onCheck: (c) => {
         if (!ownsCamera()) return;
+        if (capturing) return;
         // Guidance and auto-capture can wait for the ideal turn. Manual
         // capture cannot: side detection is deliberately uncertain at a true
         // 90-degree profile, and that uncertainty used to strand users even
         // though the following screen already supports point correction.
         ready = true;
         e.turnCue.classList.toggle("hidden", c.ready || Math.abs(c.pose.yaw) >= 38);
-        auto?.update(c.ready);
         // While the count is running the hint belongs to the countdown, which
         // has just written it. Only the two text lines are skipped — the lamp
         // and the shutter below must keep updating, or the frame freezes
@@ -587,7 +605,7 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
         // reading to repeat, so a face sitting on the boundary between two
         // checks stops strobing the screen.
         const shown = sideSettle.settle({ status: c.status, hint: c.hint, detail: c.detail });
-        if (!auto?.armed()) {
+        if (!captureRetry && !auto?.armed()) {
           e.hintTitle.textContent = shown.hint;
           e.hintDetail.textContent = shown.detail;
         }
@@ -606,6 +624,9 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
           shoot.disabled = false;
           shoot.textContent = "Capture";
         }
+        // This can synchronously start capture. It owns the hint and controls
+        // from that point onward, so no live-guidance writes may follow it.
+        auto?.update(c.ready);
       },
     });
     if (!ownsCamera()) {
@@ -640,7 +661,8 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   });
   if (e.swap) e.swap.disabled = false;
   if (e.swap) e.swap.onclick = async () => {
-    if (!ownsCamera() || !sideCam) return;
+    if (!ownsCamera() || !sideCam || capturing) return;
+    auto?.cancel();
     const swappingCamera = sideCam;
     e.swap.disabled = true;
     await swappingCamera.swap();
@@ -676,12 +698,65 @@ async function openSideCamera(ctx: SideCtx): Promise<void> {
   document.getElementById("side-stop")!.onclick = () => {
     chooseUpload();
   };
-  document.getElementById("side-shoot")!.onclick = async () => {
-    if (!ownsCamera() || !sideCam || !ready) return;
-    const shot = sideCam.capture();
-    stopSideCamera();
-    if (shot) await loadCanvas(shot, ctx);
-  };
+  async function takeSidePhoto(): Promise<void> {
+    if (!ownsCamera() || !sideCam || !ready || capturing) return;
+    const held = sideCam;
+    capturing = true;
+    captureRetry = false;
+    auto?.cancel();
+    auto = null;
+    const shoot = document.getElementById("side-shoot") as HTMLButtonElement | null;
+    if (shoot) {
+      shoot.disabled = true;
+      shoot.textContent = "Capturing…";
+    }
+    e.hintTitle.textContent = "Hold still";
+    e.hintDetail.textContent = "Taking your photo";
+    if (e.swap) e.swap.disabled = true;
+    held.setFramingLocked?.(true);
+    try {
+      const shot = held.capture();
+      if (!shot) {
+        captureRetry = true;
+        e.hintTitle.textContent = "Photo not captured";
+        e.hintDetail.textContent = "Wait for the camera to resume, then press Capture to try again.";
+        return;
+      }
+      await showCaptureFeedback(shot, { frame: e.frame, video: e.video, signal: cameraAbort.signal });
+      if (!ownsCamera() || cameraAbort.signal.aborted) return;
+      stopSideCamera();
+      const reviewSignal = sideAttempt.begin();
+      const untrack = trackDialog(closeScanConfirm);
+      const accepted = await confirmScanAction({
+        eyebrow: "CHECK YOUR PHOTO",
+        title: "Happy with this side photo?",
+        copy: "Check that your full profile is visible and clear before we place the points.",
+        confirmLabel: "Use this photo", cancelLabel: "Retake photo",
+        preview: shot, previewLabel: "The side photo you just captured", tone: "positive",
+      });
+      untrack();
+      if (!sideAttempt.current(reviewSignal) || activeScanOwner() !== cameraOwner) return;
+      if (accepted) await loadCanvas(shot, ctx, reviewSignal);
+      else void openSideCamera(ctx);
+    } catch {
+      if (ownsCamera()) {
+        captureRetry = true;
+        e.hintTitle.textContent = "Photo not captured";
+        e.hintDetail.textContent = "Press Capture to try again, or upload a photo.";
+      }
+    } finally {
+      capturing = false;
+      if (ownsCamera() && sideCam === held) {
+        held.setFramingLocked?.(false);
+        if (e.swap) e.swap.disabled = false;
+        if (shoot) {
+          shoot.disabled = false;
+          shoot.textContent = "Capture";
+        }
+      }
+    }
+  }
+  document.getElementById("side-shoot")!.onclick = () => { primeCaptureAudio(); void takeSidePhoto(); };
   appendSideExitActions(e.actions, ctx, false);
 
   // Space or Enter takes it now rather than waiting out the countdown. On a

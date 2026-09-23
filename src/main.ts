@@ -104,6 +104,9 @@ import {
 } from "./engine/trialDecline.js";
 import { loadProfile, saveProfile } from "./engine/goals.js";
 import { createAutoCapture } from "./ui/autoCapture.js";
+import { isAppForeground } from "./engine/nativeBridge.js";
+import { primeCaptureAudio, showCaptureFeedback } from "./ui/captureFeedback.js";
+import { runCaptureHandoff } from "./ui/captureHandoff.js";
 import { automaticCaptureDetail } from "./ui/captureCopy.js";
 import type { AutoCapture } from "./ui/autoCapture.js";
 import { closeScanConfirm, confirmScanAction } from "./ui/scanConfirm.js";
@@ -1414,14 +1417,18 @@ let camOpening = false;
 let cameraAbort: AbortController | null = null;
 let lastCheck: FrameCheck | null = null;
 let autoFront: AutoCapture | null = null;
+let frontCaptureBusy: CameraHandle | null = null;
+let frontCaptureRetry = false;
 let frontKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 // Wall clock until which the opening capture instruction stays put.
 let holdHintUntil = 0;
 const HINT_HOLD_MS = 3200;
 
 async function openCamera(): Promise<void> {
+  primeCaptureAudio();
   if (cam || camOpening) return;
   camOpening = true;
+  frontCaptureRetry = false;
   const generation = scanGeneration;
   if (!isSupported()) {
     el.camHintDetail.textContent = "This browser can't open a camera, so upload a photo instead.";
@@ -1451,7 +1458,14 @@ async function openCamera(): Promise<void> {
       video: el.camVideo,
       guideCanvas: el.camGuide,
       signal: controller.signal,
-      onPause: () => { if (ownsCamera()) autoFront?.cancel(); },
+      onPause: () => {
+        if (!ownsCamera()) return;
+        if (isAppForeground()) autoFront?.update(false);
+        else autoFront?.cancel();
+        if (frontCaptureBusy || frontCaptureRetry || !autoFront?.hasProgress()) return;
+        el.camHintTitle.textContent = "Camera paused";
+        el.camHintDetail.textContent = "Waiting for a live frame. The countdown will resume when the camera is ready.";
+      },
       // Both cameras refused during a swap and the working one is already
       // released: close the viewfinder rather than leave controls over a dead
       // frame, and say why.
@@ -1464,7 +1478,7 @@ async function openCamera(): Promise<void> {
         });
       },
       onCheck: (c) => {
-        if (!ownsCamera()) return;
+        if (!ownsCamera() || frontCaptureBusy) return;
         lastCheck = c;
         // Hold the opening instruction for a beat before the live coaching
         // takes over. Glasses can be detected once the camera is running; a
@@ -1481,7 +1495,7 @@ async function openCamera(): Promise<void> {
         // checks used to strobe the colour and, because the box is sized by its
         // own text, pulse the box in and out at the same time.
         const shown = frontSettle.settle({ status: c.status, hint: c.hint, detail: c.detail });
-        if (performance.now() >= holdHintUntil && !autoFront?.armed()) {
+        if (!frontCaptureRetry && performance.now() >= holdHintUntil && !autoFront?.armed()) {
           el.camHintTitle.textContent = shown.hint;
           el.camHintDetail.textContent = shown.detail;
         }
@@ -1515,6 +1529,7 @@ async function openCamera(): Promise<void> {
     autoFront = createAutoCapture({
       onTick: (remaining) => {
         if (!ownsCamera()) return;
+        cam?.setFramingLocked?.(remaining != null || !!autoFront?.hasProgress());
         if (remaining == null) {
           el.camHint.classList.remove("counting");
           setCameraLabel("Capture");
@@ -1525,7 +1540,7 @@ async function openCamera(): Promise<void> {
         el.camHintDetail.textContent = automaticCaptureDetail();
         setCameraLabel(`Capturing in ${remaining}`);
       },
-      onFire: () => { if (ownsCamera()) el.btnCamera.click(); },
+      onFire: () => { if (ownsCamera()) void takeFrontPhoto(); },
     });
     // Space or Enter fires the shutter now instead of waiting out the count.
     frontKeyHandler = (e: KeyboardEvent) => {
@@ -1602,6 +1617,7 @@ async function closeCamera(opts: { instant?: boolean } = {}): Promise<void> {
   cameraAbort = null;
   camOpening = false;
   cancelledCamera?.abort();
+  if (frontCaptureBusy === cam) frontCaptureBusy = null;
   autoFront?.cancel();
   autoFront = null;
   if (frontKeyHandler) {
@@ -1628,6 +1644,7 @@ async function closeCamera(opts: { instant?: boolean } = {}): Promise<void> {
 }
 
 el.btnCamera.addEventListener("click", async () => {
+  primeCaptureAudio();
   if (!cam) {
     // Gate first, questions second: being asked your reference population and
     // THEN told to wait until Thursday is the wrong order of bad news.
@@ -1645,14 +1662,33 @@ el.btnCamera.addEventListener("click", async () => {
     });
     return;
   }
-  if (!lastCheck?.gates.face) return;
+  await takeFrontPhoto();
+});
+
+async function takeFrontPhoto(): Promise<void> {
+  const held = cam;
+  const controller = cameraAbort;
+  if (!held || !controller || frontCaptureBusy || !lastCheck?.gates.face) return;
+  frontCaptureBusy = held;
+  frontCaptureRetry = false;
+  autoFront?.cancel();
+  autoFront = null;
+  held.setFramingLocked?.(true);
+  el.btnCamera.disabled = true;
+  el.camSwap.disabled = true;
+  setCameraLabel("Capturing…");
+  el.camHintTitle.textContent = "Hold still";
+  el.camHintDetail.textContent = "Taking your photo";
+  try {
   const token = beginScan("camera");
   if (!token) {
+    frontCaptureRetry = true;
+    el.camHintTitle.textContent = "Press Capture to retry";
     el.camHintDetail.textContent = "Your session is still loading. Try capture again in a moment.";
     return;
   }
   trackAnalytics("scan-started");
-  const generation = ++scanGeneration;
+  const generation = scanGeneration;
   // A BURST, not a shutter.
   //
   // The weighted mean reliability of the front metrics is 0.351, and a third of
@@ -1672,7 +1708,8 @@ el.btnCamera.addEventListener("click", async () => {
   // The first frame is still the photograph the user sees and everything else
   // is measured against; the rest exist only to be measured. If any of them
   // fail to grab, the scan degrades to exactly what it did before.
-  const burst = await captureBurst(cam);
+  const burst = await captureBurst(held);
+  if (controller.signal.aborted || cam !== held || !scanIsCurrent(token, generation)) return;
   const shot = burst[0] ?? null;
   // Remember that the front came from the camera, so the side step defaults to
   // the camera too rather than making the user switch capture method mid-flow.
@@ -1681,22 +1718,71 @@ el.btnCamera.addEventListener("click", async () => {
   // so animating the viewfinder back down into the landing card would be
   // showing the person a screen they are not going to.
   if (shot) {
+    await showCaptureFeedback(shot, { frame: el.ovalFrame, video: el.camVideo, signal: controller.signal });
+    if (controller.signal.aborted || cam !== held || !scanIsCurrent(token, generation)) return;
     // handleCanvas closes the camera itself, after it has put the scan on the
     // screen. Closing it here as well would reopen the gap this ordering
     // exists to shut.
-    await handleCanvas(shot, 1, generation, token, burst.slice(1));
+    await handOffFrontPhoto(shot, ++scanGeneration, token, burst.slice(1));
   } else {
-    await closeCamera({ instant: true });
     scanSession.reset();
+    frontCaptureRetry = true;
+    el.camHintTitle.textContent = "Photo not captured";
+    el.camHintDetail.textContent = "Wait for the camera to resume, then press Capture to try again.";
   }
-});
+  } catch {
+    if (!controller.signal.aborted && cam === held) {
+      frontCaptureRetry = true;
+      el.camHintTitle.textContent = "Photo not captured";
+      el.camHintDetail.textContent = "Press Capture to try again, or upload a photo.";
+    }
+  } finally {
+    if (frontCaptureBusy === held) frontCaptureBusy = null;
+    if (!controller.signal.aborted && cam === held) {
+      held.setFramingLocked?.(false);
+      el.btnCamera.disabled = false;
+      el.camSwap.disabled = false;
+      setCameraLabel("Capture");
+    }
+  }
+}
+
+async function handOffFrontPhoto(shot: HTMLCanvasElement, generation: number, token: ScanToken, extraFrames: HTMLCanvasElement[]): Promise<void> {
+  await runCaptureHandoff({
+    isCurrent: () => scanIsCurrent(token, generation),
+    run: async () => {
+      // Retrying after teardown must retry a failed detector mode switch too.
+      if (!cam && !camOpening) await setRunningMode("IMAGE");
+      await handleCanvas(shot, 1, generation, token, extraFrames);
+    },
+    onError: () => {
+      el.frame.classList.remove("scanning");
+      el.capRight.textContent = "PHOTO CAPTURED";
+      el.status.innerHTML = `<b>Your photo was taken.</b> We could not finish reading it. Try again or retake it.
+        <span class="reject-actions"><button type="button" class="btn pri" id="capture-retry-read">Try this photo again</button>
+        <button type="button" class="btn gho" id="capture-retake">Retake photo</button></span>`;
+      document.getElementById("capture-retry-read")!.onclick = () => {
+        if (!scanIsCurrent(token, generation)) return;
+        const retry = document.getElementById("capture-retry-read") as HTMLButtonElement | null;
+        if (!retry || retry.disabled) return;
+        retry.disabled = true;
+        retry.textContent = "Reading photo…";
+        void handOffFrontPhoto(shot, generation, token, extraFrames);
+      };
+      document.getElementById("capture-retake")!.onclick = () => {
+        if (scanIsCurrent(token, generation)) retakeFront("camera");
+      };
+    },
+  });
+}
 
 el.btnCancel.addEventListener("click", async () => {
   await closeCamera();
 });
 
 el.camSwap.addEventListener("click", async () => {
-  if (!cam) return;
+  if (!cam || frontCaptureBusy) return;
+  autoFront?.cancel();
   const swappingCamera = cam;
   const controller = cameraAbort;
   // Disabled while the switch is in flight: a second tap mid-switch would race

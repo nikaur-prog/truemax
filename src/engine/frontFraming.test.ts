@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { checkFrame, type FrameStats } from "./captureGuide.js";
 import { assessQuality } from "./quality.js";
-import { faceBounds, fitFrontPreview, frontFaceDetail, frontSourceFraming, settleFrontPreview, type FaceBounds } from "./frontFraming.js";
+import { faceBounds, fitFrontPreview, frontFaceDetail, frontSourceFraming, settleFrontPreview, stableFrontPreviewTarget, FRONT_EASE_MAX_STEP_MS, type FaceBounds } from "./frontFraming.js";
 
 const goodStats: FrameStats = { luma: 120, lumaHigh: 180, darkShare: 0, sharpness: 0.45 };
 function detection(box: FaceBounds, yaw = 0): FaceLandmarkerResult {
@@ -92,10 +92,82 @@ test("default and tiny-face fits show the full source without artificial magnifi
 
 test("preview settles with a deadband and honors reduced motion", () => {
   const initial = { scale: 0.5, x: -10, y: -20 };
-  assert.equal(settleFrontPreview(initial, { scale: 0.51, x: -12, y: -22 }, 100), initial);
+  assert.equal(stableFrontPreviewTarget(initial, { scale: 0.51, x: -12, y: -22 }, { width: 640, height: 480 }), initial);
   const target = { scale: 0.8, x: -100, y: -200 };
   const moved = settleFrontPreview(initial, target, 100);
   assert.ok(moved.scale > initial.scale && moved.scale < target.scale);
   assert.deepEqual(settleFrontPreview(initial, target, 100, true), initial);
   assert.equal(settleFrontPreview(null, target, 100), target);
+});
+
+test("crossing the source-detail cutoff cannot switch the preview to full frame", () => {
+  const source = { width: 1920, height: 1080 };
+  const view = { width: 390, height: 844 };
+  const barelyBelow = centered(239 / source.width, 360 / source.height);
+  const barelyAbove = centered(241 / source.width, 360 / source.height);
+  assert.equal(frontFaceDetail(barelyBelow, source).enough, false);
+  assert.equal(frontFaceDetail(barelyAbove, source).enough, true);
+  const below = fitFrontPreview(source, view, barelyBelow);
+  const above = fitFrontPreview(source, view, barelyAbove);
+  assert.ok(Math.abs(below.scale - above.scale) / above.scale < 0.02);
+  assert.ok(below.scale > fitFrontPreview(source, view, null).scale * 2);
+  assert.equal(stableFrontPreviewTarget(below, above, source), below);
+});
+
+test("small bounds and invalid bounds stay finite without masking the capture detail check", () => {
+  const source = { width: 1920, height: 1080 };
+  const view = { width: 390, height: 844 };
+  const empty = fitFrontPreview(source, view, null);
+  assert.deepEqual(fitFrontPreview(source, view, { x: NaN, y: 0.2, w: 0.2, h: 0.5 }), empty);
+  const small = centered(200 / source.width, 280 / source.height);
+  assert.equal(checkFrame(detection(small), goodStats, source).ready, false);
+  assert.ok(fitFrontPreview(source, view, small).scale > empty.scale);
+});
+
+test("display frames keep easing between detector observations and detector jitter does not pump the target", () => {
+  let rendered = { scale: 0.5, x: 0, y: 0 };
+  const target = { scale: 0.9, x: -140, y: -220 };
+  let heldTarget = target;
+  let movedFrames = 0;
+  for (let frame = 1; frame <= 60; frame++) {
+    if (frame % 6 === 0) {
+      const sign = frame % 12 === 0 ? -1 : 1;
+      heldTarget = stableFrontPreviewTarget(heldTarget, { scale: 0.9 + sign * 0.01, x: -140 + sign * 3, y: -220 - sign * 3 }, { width: 640, height: 480 });
+    }
+    assert.equal(heldTarget, target);
+    const next = settleFrontPreview(rendered, heldTarget, 1000 / 60);
+    assert.ok(next.scale > rendered.scale);
+    assert.ok(next.scale - rendered.scale < 0.011, "no ten-Hz jump between display frames");
+    movedFrames++;
+    rendered = next;
+  }
+  assert.equal(movedFrames, 60);
+  const afterStall = settleFrontPreview(rendered, target, 2500);
+  assert.deepEqual(afterStall, settleFrontPreview(rendered, target, FRONT_EASE_MAX_STEP_MS), "a resumed tab cannot jump the entire remaining zoom");
+});
+
+test("display easing is independent of normal display refresh rate", () => {
+  const target = { scale: 1, x: -100, y: -200 };
+  const animate = (fps: number) => {
+    let fit = { scale: 0.4, x: 0, y: 0 };
+    for (let i = 0; i < fps; i++) fit = settleFrontPreview(fit, target, 1000 / fps);
+    return fit;
+  };
+  const sixty = animate(60), thirty = animate(30);
+  assert.ok(Math.abs(sixty.scale - thirty.scale) < 1e-10);
+  assert.ok(Math.abs(sixty.x - thirty.x) < 1e-10);
+  assert.ok(Math.abs(sixty.y - thirty.y) < 1e-10);
+});
+
+test("a paint delayed by CPU inference moves about as far as two normal frames, never a catch-up jump", () => {
+  const start = { scale: 1, x: -20, y: 0 };
+  const target = { scale: 1.7, x: -560, y: -300 };
+  const step = (elapsed: number) => settleFrontPreview(start, target, elapsed).scale - start.scale;
+  const normal = step(1000 / 60);
+  for (const blocked of [50, 80, 120, 400]) {
+    assert.ok(step(blocked) <= normal * 2.1, `${blocked}ms paint moved ${(step(blocked) / normal).toFixed(2)} normal frames`);
+    assert.ok(step(blocked) / start.scale < 0.04, "no single paint zooms by 4% or more");
+  }
+  // Uninterrupted 60Hz and 30Hz displays keep identical wall-clock easing.
+  assert.ok(1000 / 30 <= FRONT_EASE_MAX_STEP_MS);
 });
